@@ -5,7 +5,7 @@ inputs:
   rules-url:
     description: "URL to central gitignore ruleset"
     required: false
-    default: "https://raw.githubusercontent.com/bavadeve/org-security-workflows/main/central-gitignore.txt"
+    default: "https://raw.githubusercontent.com/AmsterdamUMC-test/org-security-workflows/main/central-gitignore.txt"
 
 runs:
   using: "composite"
