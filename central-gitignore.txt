@@ -1,0 +1,150 @@
+# === General ===
+*.log
+*.tmp
+*.swp
+*.bak
+*.DS_Store
+Thumbs.db
+
+# === Data files ===
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.sav
+*.dta
+*.RData
+*.rds
+*.sqlite
+*.xml
+*.feather
+*.parquet
+*.mat
+*.pk1
+*.npz
+*.npy
+*.db
+*.fig
+*.mdl
+*.slx
+
+# === JSON ===
+*.json        # Block all JSON files by default
+
+# Allow specific known-safe JSON files
+!package-lock.json
+!poetry.lock
+!config.example.json
+!metadata.json
+!schema.json
+!manifest.json
+!*.lock.json
+
+# === Config / credentials ===
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+*.crt
+
+# === R-specific ===
+.Rhistory
+.Rapp.history
+.Rproj.user/
+.RData
+.Ruserdata
+.Rproj
+.Rout
+.Rout.save
+.Rcheck/
+renv/library/
+renv/python/
+
+# === Python-specific ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.ipynb_checkpoints
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+
+# === Conda-specific ===
+conda-meta/
+*.conda
+*.lock
+*.yaml.lock
+*.conda.lock
+envs/
+*.env/
+*.conda_env/
+*.conda-build/
+*.mamba_env/
+.mamba/
+*.log
+
+# === Quarto / Markdown outputs ===
+*.nb.html
+*.qmd.md
+*.docx
+*.pdf
+*.html
+*_cache/
+*_files/
+
+# === VS Code / IDEs ===
+.vscode/
+.idea/
+*.code-workspace
+
+# === Output folders ===
+output/
+outputs/
+figures/
+results/
+reports/
+/data/*
+!data/.gitkeep
+!data/README.md
+
+# === Additional research data types ===
+# Imaging & biosignals
+*.nii
+*.nii.gz
+*.dcm
+*.edf
+*.bdf
+*.eeg
+*.vhdr
+*.vmrk
+
+# Genomics & bioinformatics
+*.fastq
+*.fasta
+*.fna
+*.bam
+*.sam
+*.vcf
+*.gtf
+*.gff
+*.bed
+*.wig
+*.bigWig
+
+# Audio/video data
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.wav
+*.flac
+
+# Archives
+*.zip
+*.tar.gz
+*.7z
+*.rar

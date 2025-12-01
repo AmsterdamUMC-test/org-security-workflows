@@ -1,46 +1,49 @@
 #!/usr/bin/env bash
 #
-# Pre-push hook: blocks forbidden filetypes using central forbidden-extensions.txt
+# Pre-push hook using central-gitignore.txt (full gitignore semantics)
 
 set -euo pipefail
 
-FORBIDDEN_URL="hhttps://raw.githubusercontent.com/bavadeve/org-security-workflows/refs/heads/main/forbidden-extensions.txt"
+RULES_URL="https://raw.githubusercontent.com/bavadeve/org-security-workflows/main/central-gitignore.txt"
 
-error() { printf "\n\033[1;31mERROR: %s\033[0m\n\n" "$1" >&2; }
+TMP_RULES="$(mktemp)"
 
-# --- Download forbidden extension list ---
-FORBIDDEN=$(curl -sL "$FORBIDDEN_URL" || true)
+cleanup() {
+    rm -f "$TMP_RULES"
+}
+trap cleanup EXIT
 
-if [[ -z "$FORBIDDEN" ]]; then
-    error "Could not download forbidden extension list from:
-$FORBIDDEN_URL
-Push aborted (safety-first)."
-    exit 1
+# Download ruleset
+if ! curl -sL "$RULES_URL" -o "$TMP_RULES"; then
+  echo "[ERROR] Could not download central-gitignore from:"
+  echo "  $RULES_URL"
+  exit 1
 fi
 
-# --- Convert list to regex ---
-EXT_REGEX=$(echo "$FORBIDDEN" | sed 's/\./\\./g' | paste -sd '|' -)
-
-# --- Get list of files in the commits being pushed ---
+# Files staged for push
 FILES=$(git diff --cached --name-only)
 
 if [[ -z "$FILES" ]]; then
     exit 0
 fi
 
-# --- Check for forbidden extensions ---
-FOUND=()
+BLOCKED=()
+
 for FILE in $FILES; do
-    if [[ "$FILE" =~ $EXT_REGEX ]]; then
-        FOUND+=("$FILE")
+    git -c core.excludesfile="$TMP_RULES" check-ignore -q "$FILE"
+    if [[ $? -eq 0 ]]; then
+        BLOCKED+=("$FILE")
     fi
 done
 
-if (( ${#FOUND[@]} > 0 )); then
-    error "Push blocked: forbidden file types detected."
-    printf "Forbidden files:\n"
-    for f in "${FOUND[@]}"; do printf "  - %s\n" "$f"; done
-    printf "\nOverride (not recommended): git push --no-verify\n"
+if (( ${#BLOCKED[@]} > 0 )); then
+    echo -e "\n\033[1;31mERROR: Central Gitignore block triggered.\033[0m"
+    echo "The following files match forbidden patterns:"
+    for f in "${BLOCKED[@]}"; do
+        echo "  - $f"
+    done
+    echo
+    echo "Override (NOT recommended): git push --no-verify"
     exit 1
 fi
 

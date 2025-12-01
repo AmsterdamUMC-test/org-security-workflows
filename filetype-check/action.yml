@@ -1,62 +1,30 @@
-name: Filetype Check
-description: Fails if forbidden file types are found in the Git history
+name: Filetype Check (central gitignore)
+description: Fails if files match forbidden patterns defined in central-gitignore.txt
 
 inputs:
-  extension-list-path:
-    description: 'Path to the forbidden extension list file (one extension per line, no dots)'
+  rules-url:
+    description: "URL to central gitignore ruleset"
     required: false
-    default: ''
+    default: "https://raw.githubusercontent.com/bavadeve/org-security-workflows/main/central-gitignore.txt"
 
 runs:
   using: "composite"
   steps:
-    - name: Run file type check
+    - name: Download central gitignore
       shell: bash
       run: |
-        # Default to internal extension list if no input is given
-        if [ -n "${{ inputs.extension-list-path }}" ]; then
-          EXT_FILE="${{ inputs.extension-list-path }}"
-        else
-          EXT_FILE="${GITHUB_ACTION_PATH}/../forbidden-extensions.txt"
-        fi
+        curl -sL "${{ inputs.rules-url }}" -o central-gitignore.txt
 
-        echo "Using extension list at: $EXT_FILE"
+    - name: Check all tracked files
+      shell: bash
+      run: |
+        BLOCKED=0
+        while IFS= read -r FILE; do
+          git -c core.excludesfile=central-gitignore.txt check-ignore -q "$FILE"
+          if [[ $? -eq 0 ]]; then
+            echo "::error file=$FILE::Blocked by central gitignore rules"
+            BLOCKED=1
+          fi
+        done < <(git ls-files)
 
-        if [ ! -f "$EXT_FILE" ]; then
-          echo "::error title=Missing Extension List::The file '$EXT_FILE' does not exist."
-          exit 1
-        fi
-
-        COUNT=$(wc -l < "$EXT_FILE")
-        if [ "$COUNT" -lt 2 ]; then
-          echo "::error title=Suspicious Extension List::The list seems too short to be valid."
-          cat "$EXT_FILE"
-          exit 1
-        fi
-
-        REGEX=$(paste -sd'|' "$EXT_FILE")
-        echo "Compiled regex: \\.($REGEX)$"
-
-        MATCHES=$(git ls-files | grep -Ei "\\.($REGEX)$" || true)
-
-        if [ -n "$MATCHES" ]; then
-          echo "::error title=Forbidden file types detected::"
-          echo "$MATCHES"
-
-          TELEMETRY_URL="https://38fac4d34291.ngrok-free.app/telemetry"
-
-          curl -X POST "$TELEMETRY_URL" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -n \
-              --arg repo "$GITHUB_REPOSITORY" \
-              --arg sha "$GITHUB_SHA" \
-              --arg actor "$GITHUB_ACTOR" \
-              --arg matches "$MATCHES" \
-              '{repository: $repo, sha: $sha, actor: $actor, matches: $matches, timestamp: now | todate}')"
-
-          exit 1
-
-        else
-          echo "No forbidden file types found."
-        fi
-
+        exit $BLOCKED

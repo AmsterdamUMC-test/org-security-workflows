@@ -1,41 +1,28 @@
 #!/bin/bash
+#
+# Uses central-gitignore.txt to block forbidden patterns (negation supported)
+#
 
-# Path to the extension list relative to this script
-EXT_FILE="$(dirname "${BASH_SOURCE[0]}")/../forbidden-extensions.txt"
+RULES_FILE="$(dirname "${BASH_SOURCE[0]}")/../central-gitignore.txt"
 
-# Check required tools
-if ! command -v grep >/dev/null || ! command -v paste >/dev/null; then
-  echo "[ERROR] Required tools (grep, paste) not found."
+if [[ ! -f "$RULES_FILE" ]]; then
+  echo "[ERROR] central-gitignore.txt not found at: $RULES_FILE"
   exit 1
 fi
 
-# Check if extension list exists and looks valid
-if [ ! -f "$EXT_FILE" ]; then
-  echo "[ERROR] Forbidden extensions list not found: $EXT_FILE"
-  exit 1
-fi
+# Get tracked files passed as arguments
+FILES=("$@")
+BLOCKED=0
 
-COUNT=$(wc -l < "$EXT_FILE")
-if [ "$COUNT" -lt 2 ]; then
-  echo "[ERROR] Forbidden extensions list seems too short to be valid."
-  exit 1
-fi
+for FILE in "${FILES[@]}"; do
+  # git check-ignore returns 0 if file is IGNORED (blocked)
+  # but returns 1 if file is ALLOWED (or matched later by !exceptions)
+  git -c core.excludesfile="$RULES_FILE" check-ignore -q "$FILE"
 
-# Create regex pattern
-REGEX=$(grep -vE '^\s*#|^\s*$' "$EXT_FILE" | tr -d '\r' | tr '\n' '|' | sed 's/|$//')
-
-if [ -z "$REGEX" ]; then
-  echo "[ERROR] No usable extensions found in $EXT_FILE"
-  exit 1
-fi
-
-# Check files
-FOUND=0
-for FILE in "$@"; do
-  if [[ "$FILE" =~ \.($REGEX)$ ]]; then
-    echo "[ERROR] Forbidden file type detected: $FILE"
-    FOUND=1
+  if [[ $? -eq 0 ]]; then
+    echo "[ERROR] Blocked by central-gitignore: $FILE"
+    BLOCKED=1
   fi
 done
 
-exit $FOUND
+exit $BLOCKED
