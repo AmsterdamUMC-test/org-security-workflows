@@ -6,14 +6,14 @@ inputs:
     description: "URL to central-gitignore.txt"
     required: false
     default: "https://raw.githubusercontent.com/AmsterdamUMC-test/org-security-workflows/main/central-gitignore.txt"
-  telemetry-url:
-    description: "Optional REST API endpoint to receive telemetry JSON"
+  telemetry-pat:
+    description: "PAT with repo scope for sending telemetry via repository dispatch"
     required: false
     default: ""
-  telemetry-token:
-    description: "Optional bearer/API token for the telemetry endpoint"
+  telemetry-repo:
+    description: "Repository to receive telemetry (e.g., AmsterdamUMC-test/security-telemetry)"
     required: false
-    default: ""
+    default: "AmsterdamUMC-test/security-telemetry"
 
 runs:
   using: "composite"
@@ -36,10 +36,8 @@ runs:
         cat forbidden-patterns.txt
 
     - name: Check all tracked files
+      id: check
       shell: bash
-      env:
-        TELEMETRY_URL: ${{ inputs.telemetry-url }}
-        TELEMETRY_TOKEN: ${{ inputs.telemetry-token }}
       run: |
         set -uo pipefail
 
@@ -126,41 +124,65 @@ runs:
           fi
         fi
 
-        # ---------- Telemetry ----------
-        if [[ -n "${TELEMETRY_URL:-}" ]]; then
-          echo "Sending telemetry to $TELEMETRY_URL"
+        # Export for next step
+        echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
+        echo "message=${MESSAGE}" >> "$GITHUB_OUTPUT"
+        echo "blocked=${BLOCKED}" >> "$GITHUB_OUTPUT"
 
-          # Build JSON array of blocked files
-          BLOCKED_JSON="["
-          first=true
-          for f in "${BLOCKED_FILES[@]}"; do
-            if [[ "$first" == true ]]; then
-              first=false
-            else
-              BLOCKED_JSON+=","
-            fi
-            escaped_f="${f//\"/\\\"}"
-            BLOCKED_JSON+="\"${escaped_f}\""
-          done
-          BLOCKED_JSON+="]"
+        # Save blocked files to a file for the next step
+        printf '%s\n' "${BLOCKED_FILES[@]}" > blocked_files.txt
 
-          # Build payload as single line to avoid YAML issues
-          TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-          PAYLOAD="{\"repository\":\"${GITHUB_REPOSITORY:-unknown}\",\"workflow\":\"${GITHUB_WORKFLOW:-unknown}\",\"run_id\":\"${GITHUB_RUN_ID:-unknown}\",\"run_number\":\"${GITHUB_RUN_NUMBER:-unknown}\",\"sha\":\"${GITHUB_SHA:-unknown}\",\"ref\":\"${GITHUB_REF:-unknown}\",\"actor\":\"${GITHUB_ACTOR:-unknown}\",\"status\":\"${STATUS}\",\"message\":\"${MESSAGE}\",\"blocked_files\":${BLOCKED_JSON},\"timestamp\":\"${TIMESTAMP}\"}"
+    - name: Send telemetry via repository dispatch
+      if: ${{ inputs.telemetry-pat != '' }}
+      uses: actions/github-script@v7
+      env:
+        STATUS: ${{ steps.check.outputs.status }}
+        MESSAGE: ${{ steps.check.outputs.message }}
+        TELEMETRY_REPO: ${{ inputs.telemetry-repo }}
+      with:
+        github-token: ${{ inputs.telemetry-pat }}
+        script: |
+          const fs = require('fs');
 
-          # Build curl command
-          CURL_ARGS=(-sS -X POST "$TELEMETRY_URL" -H "Content-Type: application/json")
-          if [[ -n "${TELEMETRY_TOKEN:-}" ]]; then
-            CURL_ARGS+=(-H "Authorization: Bearer ${TELEMETRY_TOKEN}")
-          fi
+          // Read blocked files
+          let blockedFiles = [];
+          try {
+            const content = fs.readFileSync('blocked_files.txt', 'utf8');
+            blockedFiles = content.split('\n').filter(f => f.trim() !== '');
+          } catch (e) {
+            // No blocked files
+          }
 
-          if curl "${CURL_ARGS[@]}" -d "$PAYLOAD" --max-time 10; then
-            echo "Telemetry sent successfully."
-          else
-            echo "::warning::Telemetry send failed (ignored)."
-          fi
-        else
-          echo "No telemetry-url configured; skipping telemetry."
-        fi
+          const [owner, repo] = process.env.TELEMETRY_REPO.split('/');
 
-        exit $BLOCKED
+          await github.rest.repos.createDispatchEvent({
+            owner: owner,
+            repo: repo,
+            event_type: 'security_alert',
+            client_payload: {
+              source_repository: process.env.GITHUB_REPOSITORY,
+              workflow: process.env.GITHUB_WORKFLOW,
+              run_id: process.env.GITHUB_RUN_ID,
+              run_number: process.env.GITHUB_RUN_NUMBER,
+              sha: process.env.GITHUB_SHA,
+              ref: process.env.GITHUB_REF,
+              actor: process.env.GITHUB_ACTOR,
+              status: process.env.STATUS,
+              message: process.env.MESSAGE,
+              blocked_files: blockedFiles,
+              timestamp: new Date().toISOString()
+            }
+          });
+
+          console.log('Telemetry sent to ' + process.env.TELEMETRY_REPO);
+
+    - name: No telemetry configured
+      if: ${{ inputs.telemetry-pat == '' }}
+      shell: bash
+      run: |
+        echo "No telemetry-pat configured; skipping telemetry."
+
+    - name: Exit with appropriate code
+      shell: bash
+      run: |
+        exit ${{ steps.check.outputs.blocked }}

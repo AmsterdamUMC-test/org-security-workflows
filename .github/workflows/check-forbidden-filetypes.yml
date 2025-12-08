@@ -3,9 +3,7 @@ name: Check Forbidden Filetypes
 on:
   workflow_call:
     secrets:
-      TELEMETRY_URL:
-        required: false
-      TELEMETRY_TOKEN:
+      TELEMETRY_PAT:
         required: false
 
 jobs:
@@ -17,5 +15,5 @@ jobs:
       - name: Central filetype check with telemetry
         uses: AmsterdamUMC-test/org-security-workflows/filetype-check@main
         with:
-          telemetry-url: ${{ secrets.TELEMETRY_URL }}
-          telemetry-token: ${{ secrets.TELEMETRY_TOKEN }}
+          telemetry-pat: ${{ secrets.TELEMETRY_PAT }}
+          telemetry-repo: AmsterdamUMC-test/security-telemetry
