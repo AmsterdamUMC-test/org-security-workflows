@@ -86,8 +86,6 @@ pre-commit install --hook-type pre-push
 
 This ensures commits are checked locally before being pushed.
 
----
-
 ## How It Works
 
 ### The Central Gitignore
@@ -122,9 +120,6 @@ Some files are blocked by default but have exceptions for common safe files:
 
 See `central-gitignore.txt` for the full list.
 
----
-
-
 ## What Happens When a File is Blocked
 
 ### Pre-commit hook
@@ -147,8 +142,6 @@ To bypass (NOT recommended): git commit --no-verify
 ### GitHub Action
 
 The workflow will fail with a red ❌ and annotate the problematic files.
-
----
 
 ## Remediation
 
@@ -174,8 +167,6 @@ git push --force --all
 ```
 
 See [GitHub's guide on removing sensitive data](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository).
-
----
 
 ## Troubleshooting
 
@@ -210,8 +201,6 @@ git push origin main # should be stopped by pre-push
 git push origin main --no-verify # push through pre-push --> file is uploaded and should trigger a GitHub Action
 ```
 
----
-
 ## Notes for Windows / GitHub Desktop Users
 
 On Windows, pre-commit hooks will not run correctly in default GitHub Desktop shell environments. To enable proper behavior:
@@ -234,4 +223,5 @@ These layers provide increasing levels of safety, from developer machines to rep
 
 ## License
 
-This project is licensed under the MIT License.
+MIT License - See [LICENSE](LICENSE)
+
