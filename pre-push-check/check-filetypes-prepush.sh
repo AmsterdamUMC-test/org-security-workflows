@@ -80,10 +80,11 @@ matches_pattern() {
 if [[ -n "${PRE_COMMIT_FROM_REF:-}" && -n "${PRE_COMMIT_TO_REF:-}" ]]; then
   # Running via pre-commit
   if [[ "$PRE_COMMIT_FROM_REF" == "0000000000000000000000000000000000000000" ]]; then
-    # New branch
+    # New branch - check all files
     FILES=$(git ls-tree -r --name-only "$PRE_COMMIT_TO_REF")
   else
-    FILES=$(git diff --name-only "$PRE_COMMIT_FROM_REF..$PRE_COMMIT_TO_REF" 2>/dev/null || echo "")
+    # Only check added/modified files, not deleted (--diff-filter=AM)
+    FILES=$(git diff --name-only --diff-filter=AM "$PRE_COMMIT_FROM_REF..$PRE_COMMIT_TO_REF" 2>/dev/null || echo "")
   fi
 else
   # Running as standalone hook - read from stdin
@@ -91,7 +92,8 @@ else
     if [[ "$remote_sha" == "0000000000000000000000000000000000000000" ]]; then
       FILES=$(git ls-tree -r --name-only "$local_sha")
     else
-      FILES=$(git diff --name-only "$remote_sha..$local_sha" 2>/dev/null || echo "")
+      # Only check added/modified files, not deleted (--diff-filter=AM)
+      FILES=$(git diff --name-only --diff-filter=AM "$remote_sha..$local_sha" 2>/dev/null || echo "")
     fi
   done
 fi
