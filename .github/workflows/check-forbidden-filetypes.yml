@@ -4,13 +4,13 @@ on:
   workflow_call:
 
 jobs:
-  check:
-    name: Check for forbidden filetypes
+  filetype-check:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Run filetype check
+      - name: Central filetype check with telemetry
         uses: AmsterdamUMC-test/org-security-workflows/filetype-check@main
+        with:
+          telemetry-url: ${{ secrets.TELEMETRY_URL }} # e.g. your ngrok /telemetry URL
+          telemetry-token: ${{ secrets.TELEMETRY_TOKEN }} # optional shared secret
