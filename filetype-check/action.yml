@@ -6,6 +6,14 @@ inputs:
     description: "URL to central-gitignore.txt"
     required: false
     default: "https://raw.githubusercontent.com/AmsterdamUMC-test/org-security-workflows/main/central-gitignore.txt"
+  telemetry-url:
+    description: "Optional REST API endpoint to receive telemetry JSON"
+    required: false
+    default: ""
+  telemetry-token:
+    description: "Optional bearer/API token for the telemetry endpoint"
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -28,88 +36,150 @@ runs:
         echo "Extracted forbidden patterns:"
         cat forbidden-patterns.txt
 
-    - name: Check all tracked files
+    - name: Check all tracked files + send telemetry
       shell: bash
+      env:
+        TELEMETRY_URL: ${{ inputs.telemetry-url }}
+        TELEMETRY_TOKEN: ${{ inputs.telemetry-token }}
       run: |
+        set -euo pipefail
+
         if [[ ! -s forbidden-patterns.txt ]]; then
           echo "No FORBIDDEN patterns found, skipping check"
-          exit 0
-        fi
+          STATUS="ok"
+          MESSAGE="no_forbidden_patterns"
+          BLOCKED=0
+          BLOCKED_FILES=()
+        else
+          # Parse patterns into blocked and exceptions
+          BLOCKED_PATTERNS=()
+          EXCEPTION_PATTERNS=()
 
-        # Parse patterns into blocked and exceptions
-        BLOCKED_PATTERNS=()
-        EXCEPTION_PATTERNS=()
-
-        while IFS= read -r line; do
-          [[ -z "$line" ]] && continue
-          if [[ "$line" == !* ]]; then
-            EXCEPTION_PATTERNS+=("${line#!}")
-          else
-            BLOCKED_PATTERNS+=("${line}")
-          fi
-        done < forbidden-patterns.txt
-
-        # Function to check if filename matches a glob pattern
-        matches_pattern() {
-          local file="$1"
-          local pattern="$2"
-          local basename="${file##*/}"
-
-          if [[ "$pattern" == \** ]]; then
-            [[ "$basename" == $pattern ]] && return 0
-          elif [[ "$pattern" == .* ]]; then
-            [[ "$basename" == $pattern ]] && return 0
-          elif [[ "$basename" == "$pattern" ]]; then
-            return 0
-          fi
-          return 1
-        }
-
-        BLOCKED=0
-        BLOCKED_FILES=()
-
-        while IFS= read -r FILE; do
-          is_blocked=false
-          is_exception=false
-
-          # Check if file matches any blocked pattern
-          for pattern in "${BLOCKED_PATTERNS[@]}"; do
-            if matches_pattern "$FILE" "$pattern"; then
-              is_blocked=true
-              break
+          while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            if [[ "$line" == !* ]]; then
+              EXCEPTION_PATTERNS+=("${line#!}")
+            else
+              BLOCKED_PATTERNS+=("${line}")
             fi
-          done
+          done < forbidden-patterns.txt
 
-          # If blocked, check if it's an exception
-          if [[ "$is_blocked" == true ]]; then
-            for pattern in "${EXCEPTION_PATTERNS[@]}"; do
+          # Function to check if filename matches a glob pattern
+          matches_pattern() {
+            local file="$1"
+            local pattern="$2"
+            local basename="${file##*/}"
+
+            if [[ "$pattern" == \** ]]; then
+              [[ "$basename" == $pattern ]] && return 0
+            elif [[ "$pattern" == .* ]]; then
+              [[ "$basename" == $pattern ]] && return 0
+            elif [[ "$basename" == "$pattern" ]]; then
+              return 0
+            fi
+            return 1
+          }
+
+          BLOCKED=0
+          BLOCKED_FILES=()
+
+          while IFS= read -r FILE; do
+            is_blocked=false
+            is_exception=false
+
+            # Check if file matches any blocked pattern
+            for pattern in "${BLOCKED_PATTERNS[@]}"; do
               if matches_pattern "$FILE" "$pattern"; then
-                is_exception=true
+                is_blocked=true
                 break
               fi
             done
-          fi
 
-          # Add to blocked list if blocked and not an exception
-          if [[ "$is_blocked" == true && "$is_exception" == false ]]; then
-            echo "::error file=$FILE::Blocked by FORBIDDEN patterns in central-gitignore.txt"
-            BLOCKED_FILES+=("$FILE")
-            BLOCKED=1
-          fi
-        done < <(git ls-files)
+            # If blocked, check if it's an exception
+            if [[ "$is_blocked" == true ]]; then
+              for pattern in "${EXCEPTION_PATTERNS[@]}"; do
+                if matches_pattern "$FILE" "$pattern"; then
+                  is_exception=true
+                  break
+                fi
+              done
+            fi
 
-        if [[ $BLOCKED -eq 1 ]]; then
-          echo ""
-          echo "=========================================="
-          echo "ERROR: Forbidden file types detected!"
-          echo "=========================================="
-          echo "Blocked files:"
-          for f in "${BLOCKED_FILES[@]}"; do
-            echo "  - $f"
-          done
-          echo ""
-          echo "These files must be removed from the repository."
-          echo "See: https://github.com/AmsterdamUMC-test/org-security-workflows#remediation"
+            # Add to blocked list if blocked and not an exception
+            if [[ "$is_blocked" == true && "$is_exception" == false ]]; then
+              echo "::error file=$FILE::Blocked by FORBIDDEN patterns in central-gitignore.txt"
+              BLOCKED_FILES+=("$FILE")
+              BLOCKED=1
+            fi
+          done < <(git ls-files)
+
+          if [[ $BLOCKED -eq 1 ]]; then
+            echo ""
+            echo "=========================================="
+            echo "ERROR: Forbidden file types detected!"
+            echo "=========================================="
+            echo "Blocked files:"
+            for f in "${BLOCKED_FILES[@]}"; do
+              echo "  - $f"
+            done
+            echo ""
+            echo "These files must be removed from the repository."
+            echo "See: https://github.com/AmsterdamUMC-test/org-security-workflows#remediation"
+            STATUS="fail"
+            MESSAGE="forbidden_files_found"
+          else
+            echo "No forbidden file types found."
+            STATUS="ok"
+            MESSAGE="no_forbidden_files"
+          fi
         fi
 
-        exit $BLOCKED
+        # ---------- Telemetry (optional) ----------
+        if [[ -n "${TELEMETRY_URL:-}" ]]; then
+          echo "Sending telemetry to $TELEMETRY_URL"
+
+          # Build JSON array of blocked files
+          if (( ${#BLOCKED_FILES[@]} > 0 )); then
+            BLOCKED_JSON=$(printf '%s\n' "${BLOCKED_FILES[@]}" | python3 - << 'PY'
+import json, sys
+lines = [l.strip() for l in sys.stdin if l.strip()]
+print(json.dumps(lines))
+PY
+)
+          else
+            BLOCKED_JSON="[]"
+          fi
+
+          # Build payload
+          read -r -d '' PAYLOAD <<EOF || true
+{
+  "repository": "${GITHUB_REPOSITORY}",
+  "workflow": "${GITHUB_WORKFLOW}",
+  "run_id": "${GITHUB_RUN_ID}",
+  "run_number": "${GITHUB_RUN_NUMBER}",
+  "sha": "${GITHUB_SHA}",
+  "actor": "${GITHUB_ACTOR}",
+  "status": "${STATUS}",
+  "message": "${MESSAGE}",
+  "blocked_files": ${BLOCKED_JSON},
+  "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+}
+EOF
+
+          # Optional auth header
+          AUTH_HEADER=()
+          if [[ -n "${TELEMETRY_TOKEN:-}" ]]; then
+            AUTH_HEADER=(-H "Authorization: Bearer ${TELEMETRY_TOKEN}")
+          fi
+
+          # Fire-and-forget: telemetry failure must NOT break the check logic
+          curl -sS -X POST "$TELEMETRY_URL" \
+            -H "Content-Type: application/json" \
+            "${AUTH_HEADER[@]}" \
+            -d "$PAYLOAD" || echo "Telemetry send failed (ignored)."
+        else
+          echo "No telemetry-url configured; skipping telemetry."
+        fi
+        # ---------- End telemetry ----------
+
+        exit "$BLOCKED"
