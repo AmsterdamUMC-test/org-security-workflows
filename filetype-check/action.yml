@@ -18,6 +18,7 @@ runs:
     - name: Extract FORBIDDEN patterns
       shell: bash
       run: |
+        # Extract blocked and exception patterns separately
         awk '
           /^# BEGIN FORBIDDEN/ { capture=1; next }
           /^# END FORBIDDEN/   { capture=0; next }
@@ -35,13 +36,64 @@ runs:
           exit 0
         fi
 
+        # Parse patterns into blocked and exceptions
+        BLOCKED_PATTERNS=()
+        EXCEPTION_PATTERNS=()
+
+        while IFS= read -r line; do
+          [[ -z "$line" ]] && continue
+          if [[ "$line" == !* ]]; then
+            EXCEPTION_PATTERNS+=("${line#!}")
+          else
+            BLOCKED_PATTERNS+=("${line}")
+          fi
+        done < forbidden-patterns.txt
+
+        # Function to check if filename matches a glob pattern
+        matches_pattern() {
+          local file="$1"
+          local pattern="$2"
+          local basename="${file##*/}"
+
+          if [[ "$pattern" == \** ]]; then
+            [[ "$basename" == $pattern ]] && return 0
+          elif [[ "$pattern" == .* ]]; then
+            [[ "$basename" == $pattern ]] && return 0
+          elif [[ "$basename" == "$pattern" ]]; then
+            return 0
+          fi
+          return 1
+        }
+
         BLOCKED=0
-        BLOCKED_FILES=""
+        BLOCKED_FILES=()
 
         while IFS= read -r FILE; do
-          if git -c core.excludesfile=forbidden-patterns.txt check-ignore -q "$FILE" 2>/dev/null; then
+          is_blocked=false
+          is_exception=false
+
+          # Check if file matches any blocked pattern
+          for pattern in "${BLOCKED_PATTERNS[@]}"; do
+            if matches_pattern "$FILE" "$pattern"; then
+              is_blocked=true
+              break
+            fi
+          done
+
+          # If blocked, check if it's an exception
+          if [[ "$is_blocked" == true ]]; then
+            for pattern in "${EXCEPTION_PATTERNS[@]}"; do
+              if matches_pattern "$FILE" "$pattern"; then
+                is_exception=true
+                break
+              fi
+            done
+          fi
+
+          # Add to blocked list if blocked and not an exception
+          if [[ "$is_blocked" == true && "$is_exception" == false ]]; then
             echo "::error file=$FILE::Blocked by FORBIDDEN patterns in central-gitignore.txt"
-            BLOCKED_FILES="$BLOCKED_FILES\n  - $FILE"
+            BLOCKED_FILES+=("$FILE")
             BLOCKED=1
           fi
         done < <(git ls-files)
@@ -51,7 +103,10 @@ runs:
           echo "=========================================="
           echo "ERROR: Forbidden file types detected!"
           echo "=========================================="
-          echo -e "Blocked files:$BLOCKED_FILES"
+          echo "Blocked files:"
+          for f in "${BLOCKED_FILES[@]}"; do
+            echo "  - $f"
+          done
           echo ""
           echo "These files must be removed from the repository."
           echo "See: https://github.com/AmsterdamUMC-test/org-security-workflows#remediation"
