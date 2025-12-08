@@ -1,117 +1,52 @@
-# === General ===
-*.log
-*.tmp
-*.swp
-*.bak
-*.DS_Store
-Thumbs.db
+# ==============================================================================
+# CENTRAL GITIGNORE - Amsterdam UMC Research GitHub Organization
+# ==============================================================================
+#
+# This file serves two purposes:
+#   1. As a .gitignore template for researcher repositories
+#   2. As the source for pre-commit and GitHub Action security checks
+#
+# IMPORTANT: Only patterns between "# BEGIN FORBIDDEN" and "# END FORBIDDEN"
+# are enforced by pre-commit hooks and GitHub Actions. Everything else is
+# convenience-only (helps researchers but won't block commits).
+#
+# ==============================================================================
 
-# === Data files ===
+
+# ==============================================================================
+# SECTION 1: FORBIDDEN DATA PATTERNS
+# ==============================================================================
+# These file types are blocked by pre-commit hooks and GitHub Actions.
+# Committing these files will fail security checks.
+# If you need to commit an exception, contact your data steward.
+# ==============================================================================
+
+# BEGIN FORBIDDEN
+
+# --- Tabular data ---
 *.csv
 *.tsv
 *.xlsx
 *.xls
 *.sav
 *.dta
-*.RData
-*.rds
-*.sqlite
-*.xml
 *.feather
 *.parquet
+
+# --- Statistical/scientific data formats ---
+*.RData
+*.rds
 *.mat
 *.pk1
 *.npz
 *.npy
-*.db
 *.fig
-*.mdl
-*.slx
 
-# === JSON ===
-*.json        # Block all JSON files by default
+# --- Databases ---
+*.sqlite
+*.db
 
-# Allow specific known-safe JSON files
-!package-lock.json
-!poetry.lock
-!config.example.json
-!metadata.json
-!schema.json
-!manifest.json
-!*.lock.json
-
-# === Config / credentials ===
-.env
-.env.*
-*.key
-*.pem
-*.pfx
-*.crt
-
-# === R-specific ===
-.Rhistory
-.Rapp.history
-.Rproj.user/
-.RData
-.Ruserdata
-.Rproj
-.Rout
-.Rout.save
-.Rcheck/
-renv/library/
-renv/python/
-
-# === Python-specific ===
-__pycache__/
-*.py[cod]
-*.pyo
-*.egg-info/
-*.ipynb_checkpoints
-.venv/
-venv/
-env/
-pip-wheel-metadata/
-
-# === Conda-specific ===
-conda-meta/
-*.conda
-*.lock
-*.yaml.lock
-*.conda.lock
-envs/
-*.env/
-*.conda_env/
-*.conda-build/
-*.mamba_env/
-.mamba/
-*.log
-
-# === Quarto / Markdown outputs ===
-*.nb.html
-*.qmd.md
-*.docx
-*.pdf
-*.html
-*_cache/
-*_files/
-
-# === VS Code / IDEs ===
-.vscode/
-.idea/
-*.code-workspace
-
-# === Output folders ===
-output/
-outputs/
-figures/
-results/
-reports/
-/data/*
-!data/.gitkeep
-!data/README.md
-
-# === Additional research data types ===
-# Imaging & biosignals
+# --- Imaging & biosignals ---
 *.nii
 *.nii.gz
 *.dcm
@@ -121,9 +56,11 @@ reports/
 *.vhdr
 *.vmrk
 
-# Genomics & bioinformatics
+# --- Genomics & bioinformatics ---
 *.fastq
+*.fastq.gz
 *.fasta
+*.fasta.gz
 *.fna
 *.bam
 *.sam
@@ -134,7 +71,7 @@ reports/
 *.wig
 *.bigWig
 
-# Audio/video data
+# --- Audio/video data ---
 *.mp4
 *.avi
 *.mov
@@ -143,8 +80,125 @@ reports/
 *.wav
 *.flac
 
-# Archives
+# --- Archives (may contain data) ---
 *.zip
 *.tar.gz
 *.7z
 *.rar
+
+# --- Credentials & secrets ---
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+*.crt
+
+# --- JSON (blocked by default, with exceptions) ---
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!jsconfig.json
+!composer.json
+!config.example.json
+!.prettierrc.json
+!.eslintrc.json
+!metadata.json
+!schema.json
+!manifest.json
+
+# --- XML (blocked by default, with exceptions) ---
+*.xml
+!pom.xml
+!web.xml
+!app.config
+!packages.config
+!*.csproj
+!*.vbproj
+!*.vcxproj
+!*.fsproj
+!*.props
+!*.targets
+
+# END FORBIDDEN
+
+
+# ==============================================================================
+# SECTION 2: CONVENIENCE PATTERNS (gitignore only, not enforced)
+# ==============================================================================
+# These patterns help keep repos clean but won't trigger pre-commit failures.
+# Researchers can commit these files if needed.
+# ==============================================================================
+
+# --- OS generated files ---
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+*.tmp
+*.log
+
+# --- IDE / Editor settings ---
+.vscode/
+.idea/
+*.code-workspace
+
+# --- R environment ---
+.Rhistory
+.Rapp.history
+.Rproj.user/
+.Ruserdata
+.Rproj
+.Rout
+.Rout.save
+.Rcheck/
+renv/library/
+renv/python/
+
+# --- Python environment ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+
+# --- Conda environment ---
+conda-meta/
+*.conda
+*.lock
+*.yaml.lock
+*.conda.lock
+envs/
+*.conda_env/
+*.conda-build/
+*.mamba_env/
+.mamba/
+
+# --- MATLAB/Simulink (models, not data) ---
+*.mdl
+*.slx
+
+# --- Quarto / R Markdown build artifacts ---
+*.nb.html
+*.qmd.md
+*_cache/
+*_files/
+
+# --- Common output folders ---
+# (Researchers may choose to commit these; not enforced)
+output/
+outputs/
+figures/
+results/
+reports/
+
+# --- Data folder structure ---
+# Block contents but allow folder structure files
+/data/*
+!data/.gitkeep
+!data/README.md
