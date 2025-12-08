@@ -1,9 +1,9 @@
-name: Filetype Check (central gitignore)
-description: Fails if files match forbidden patterns defined in central-gitignore.txt
+name: Filetype Check (FORBIDDEN patterns only)
+description: Fails if committed files match FORBIDDEN patterns from central-gitignore.txt
 
 inputs:
   rules-url:
-    description: "URL to central gitignore ruleset"
+    description: "URL to central-gitignore.txt"
     required: false
     default: "https://raw.githubusercontent.com/AmsterdamUMC-test/org-security-workflows/main/central-gitignore.txt"
 
@@ -15,16 +15,46 @@ runs:
       run: |
         curl -sL "${{ inputs.rules-url }}" -o central-gitignore.txt
 
+    - name: Extract FORBIDDEN patterns
+      shell: bash
+      run: |
+        awk '
+          /^# BEGIN FORBIDDEN/ { capture=1; next }
+          /^# END FORBIDDEN/   { capture=0; next }
+          capture && /^[^#]/ && NF { print }
+        ' central-gitignore.txt > forbidden-patterns.txt
+
+        echo "Extracted forbidden patterns:"
+        cat forbidden-patterns.txt
+
     - name: Check all tracked files
       shell: bash
       run: |
+        if [[ ! -s forbidden-patterns.txt ]]; then
+          echo "No FORBIDDEN patterns found, skipping check"
+          exit 0
+        fi
+
         BLOCKED=0
+        BLOCKED_FILES=""
+
         while IFS= read -r FILE; do
-          git -c core.excludesfile=central-gitignore.txt check-ignore -q "$FILE"
-          if [[ $? -eq 0 ]]; then
-            echo "::error file=$FILE::Blocked by central gitignore rules"
+          if git -c core.excludesfile=forbidden-patterns.txt check-ignore -q "$FILE" 2>/dev/null; then
+            echo "::error file=$FILE::Blocked by FORBIDDEN patterns in central-gitignore.txt"
+            BLOCKED_FILES="$BLOCKED_FILES\n  - $FILE"
             BLOCKED=1
           fi
         done < <(git ls-files)
+
+        if [[ $BLOCKED -eq 1 ]]; then
+          echo ""
+          echo "=========================================="
+          echo "ERROR: Forbidden file types detected!"
+          echo "=========================================="
+          echo -e "Blocked files:$BLOCKED_FILES"
+          echo ""
+          echo "These files must be removed from the repository."
+          echo "See: https://github.com/AmsterdamUMC-test/org-security-workflows#remediation"
+        fi
 
         exit $BLOCKED
