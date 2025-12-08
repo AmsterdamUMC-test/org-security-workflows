@@ -3,14 +3,12 @@
 # Pre-push hook: checks files being pushed against FORBIDDEN patterns only
 # Downloads central-gitignore.txt and extracts FORBIDDEN sections
 #
-
 set -euo pipefail
 
 RULES_URL="https://raw.githubusercontent.com/AmsterdamUMC-test/org-security-workflows/main/central-gitignore.txt"
 
 TMP_DIR="$(mktemp -d)"
 TMP_GITIGNORE="$TMP_DIR/central-gitignore.txt"
-TMP_RULES="$TMP_DIR/forbidden-patterns.txt"
 
 cleanup() {
   rm -rf "$TMP_DIR"
@@ -25,26 +23,62 @@ if ! curl -sL "$RULES_URL" -o "$TMP_GITIGNORE"; then
 fi
 
 # Extract only FORBIDDEN sections
-awk '
-  /^# BEGIN FORBIDDEN/ { capture=1; next }
-  /^# END FORBIDDEN/   { capture=0; next }
-  capture && /^[^#]/ && NF { print }
-' "$TMP_GITIGNORE" > "$TMP_RULES"
+BLOCKED_PATTERNS=()
+EXCEPTION_PATTERNS=()
 
-if [[ ! -s "$TMP_RULES" ]]; then
+in_forbidden=false
+while IFS= read -r line; do
+  if [[ "$line" == "# BEGIN FORBIDDEN" ]]; then
+    in_forbidden=true
+    continue
+  elif [[ "$line" == "# END FORBIDDEN" ]]; then
+    in_forbidden=false
+    continue
+  fi
+
+  [[ "$in_forbidden" == false ]] && continue
+  [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+
+  # Trim whitespace
+  line="${line#"${line%%[![:space:]]*}"}"
+  line="${line%"${line##*[![:space:]]}"}"
+
+  if [[ "$line" == !* ]]; then
+    EXCEPTION_PATTERNS+=("${line#!}")
+  else
+    BLOCKED_PATTERNS+=("${line}")
+  fi
+done < "$TMP_GITIGNORE"
+
+if [[ ${#BLOCKED_PATTERNS[@]} -eq 0 ]]; then
   echo "[WARNING] No FORBIDDEN patterns found in central-gitignore.txt"
   exit 0
 fi
+
+# Function to check if a filename matches a glob pattern
+matches_pattern() {
+  local file="$1"
+  local pattern="$2"
+  local basename="${file##*/}"
+
+  if [[ "$pattern" == \** ]]; then
+    [[ "$basename" == $pattern ]] && return 0
+  elif [[ "$pattern" == .* ]]; then
+    [[ "$basename" == $pattern ]] && return 0
+  elif [[ "$basename" == "$pattern" ]]; then
+    return 0
+  fi
+
+  return 1
+}
 
 # Read stdin for push info (provided by git)
 # Format: <local ref> <local sha> <remote ref> <remote sha>
 while read -r local_ref local_sha remote_ref remote_sha; do
   # Handle new branch (remote_sha is all zeros)
   if [[ "$remote_sha" == "0000000000000000000000000000000000000000" ]]; then
-    # New branch: check all files in the branch
     FILES=$(git ls-tree -r --name-only "$local_sha")
   else
-    # Existing branch: check only new/modified files
     FILES=$(git diff --name-only "$remote_sha..$local_sha" 2>/dev/null || git ls-tree -r --name-only "$local_sha")
   fi
 
@@ -52,15 +86,34 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     continue
   fi
 
-  BLOCKED=()
+  BLOCKED_FILES=()
 
   for FILE in $FILES; do
-    if git -c core.excludesfile="$TMP_RULES" check-ignore -q "$FILE" 2>/dev/null; then
-      BLOCKED+=("$FILE")
+    is_blocked=false
+    is_exception=false
+
+    for pattern in "${BLOCKED_PATTERNS[@]}"; do
+      if matches_pattern "$FILE" "$pattern"; then
+        is_blocked=true
+        break
+      fi
+    done
+
+    if [[ "$is_blocked" == true ]]; then
+      for pattern in "${EXCEPTION_PATTERNS[@]}"; do
+        if matches_pattern "$FILE" "$pattern"; then
+          is_exception=true
+          break
+        fi
+      done
+    fi
+
+    if [[ "$is_blocked" == true && "$is_exception" == false ]]; then
+      BLOCKED_FILES+=("$FILE")
     fi
   done
 
-  if (( ${#BLOCKED[@]} > 0 )); then
+  if (( ${#BLOCKED_FILES[@]} > 0 )); then
     echo ""
     echo -e "\033[1;31m══════════════════════════════════════════════════════════════\033[0m"
     echo -e "\033[1;31m  ERROR: Forbidden file types detected!\033[0m"
@@ -68,7 +121,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     echo ""
     echo "The following files match forbidden data patterns:"
     echo ""
-    for f in "${BLOCKED[@]}"; do
+    for f in "${BLOCKED_FILES[@]}"; do
       echo -e "  \033[33m✗\033[0m $f"
     done
     echo ""

@@ -4,7 +4,6 @@
 # Extracts patterns between "# BEGIN FORBIDDEN" and "# END FORBIDDEN"
 # from central-gitignore.txt
 #
-
 set -euo pipefail
 
 RULES_FILE="$(dirname "${BASH_SOURCE[0]}")/../central-gitignore.txt"
@@ -14,17 +13,41 @@ if [[ ! -f "$RULES_FILE" ]]; then
   exit 1
 fi
 
-# Extract only FORBIDDEN sections (supports multiple sections like FORBIDDEN_JSON)
-TMP_RULES="$(mktemp)"
-trap "rm -f $TMP_RULES" EXIT
+# Extract only FORBIDDEN sections
+# Stores blocked patterns and exception patterns separately
+BLOCKED_PATTERNS=()
+EXCEPTION_PATTERNS=()
 
-awk '
-  /^# BEGIN FORBIDDEN/ { capture=1; next }
-  /^# END FORBIDDEN/   { capture=0; next }
-  capture && /^[^#]/ && NF { print }
-' "$RULES_FILE" > "$TMP_RULES"
+in_forbidden=false
+while IFS= read -r line; do
+  # Check for section markers
+  if [[ "$line" == "# BEGIN FORBIDDEN" ]]; then
+    in_forbidden=true
+    continue
+  elif [[ "$line" == "# END FORBIDDEN" ]]; then
+    in_forbidden=false
+    continue
+  fi
 
-if [[ ! -s "$TMP_RULES" ]]; then
+  # Skip if not in forbidden section
+  [[ "$in_forbidden" == false ]] && continue
+
+  # Skip comments and empty lines
+  [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+
+  # Trim whitespace
+  line="${line#"${line%%[![:space:]]*}"}"
+  line="${line%"${line##*[![:space:]]}"}"
+
+  # Check if it's an exception pattern (starts with !)
+  if [[ "$line" == !* ]]; then
+    EXCEPTION_PATTERNS+=("${line#!}")
+  else
+    BLOCKED_PATTERNS+=("${line}")
+  fi
+done < "$RULES_FILE"
+
+if [[ ${#BLOCKED_PATTERNS[@]} -eq 0 ]]; then
   echo "[WARNING] No FORBIDDEN patterns found in central-gitignore.txt"
   exit 0
 fi
@@ -36,12 +59,53 @@ if [[ ${#FILES[@]} -eq 0 ]]; then
   exit 0
 fi
 
+# Function to check if a filename matches a glob pattern
+matches_pattern() {
+  local file="$1"
+  local pattern="$2"
+  local basename="${file##*/}"
+
+  # Handle patterns like *.csv, *.nii.gz
+  if [[ "$pattern" == \** ]]; then
+    [[ "$basename" == $pattern ]] && return 0
+  # Handle patterns like .env, .env.*
+  elif [[ "$pattern" == .* ]]; then
+    [[ "$basename" == $pattern ]] && return 0
+  # Handle exact matches
+  elif [[ "$basename" == "$pattern" ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
 BLOCKED=0
 BLOCKED_FILES=()
 
 for FILE in "${FILES[@]}"; do
-  # git check-ignore returns 0 if file matches (would be ignored/blocked)
-  if git -c core.excludesfile="$TMP_RULES" check-ignore -q "$FILE" 2>/dev/null; then
+  is_blocked=false
+  is_exception=false
+
+  # Check if file matches any blocked pattern
+  for pattern in "${BLOCKED_PATTERNS[@]}"; do
+    if matches_pattern "$FILE" "$pattern"; then
+      is_blocked=true
+      break
+    fi
+  done
+
+  # If blocked, check if it's an exception
+  if [[ "$is_blocked" == true ]]; then
+    for pattern in "${EXCEPTION_PATTERNS[@]}"; do
+      if matches_pattern "$FILE" "$pattern"; then
+        is_exception=true
+        break
+      fi
+    done
+  fi
+
+  # Add to blocked list if blocked and not an exception
+  if [[ "$is_blocked" == true && "$is_exception" == false ]]; then
     BLOCKED_FILES+=("$FILE")
     BLOCKED=1
   fi
