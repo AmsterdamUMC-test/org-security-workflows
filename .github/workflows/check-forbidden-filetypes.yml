@@ -2,6 +2,11 @@ name: Check Forbidden Filetypes
 
 on:
   workflow_call:
+    secrets:
+      TELEMETRY_URL:
+        required: false
+      TELEMETRY_TOKEN:
+        required: false
 
 jobs:
   filetype-check:
@@ -12,5 +17,5 @@ jobs:
       - name: Central filetype check with telemetry
         uses: AmsterdamUMC-test/org-security-workflows/filetype-check@main
         with:
-          telemetry-url: ${{ secrets.TELEMETRY_URL }} # e.g. your ngrok /telemetry URL
-          telemetry-token: ${{ secrets.TELEMETRY_TOKEN }} # optional shared secret
+          telemetry-url: ${{ secrets.TELEMETRY_URL }}
+          telemetry-token: ${{ secrets.TELEMETRY_TOKEN }}
