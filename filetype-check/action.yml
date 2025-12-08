@@ -36,20 +36,21 @@ runs:
         echo "Extracted forbidden patterns:"
         cat forbidden-patterns.txt
 
-    - name: Check all tracked files + send telemetry
+    - name: Check all tracked files
       shell: bash
       env:
         TELEMETRY_URL: ${{ inputs.telemetry-url }}
         TELEMETRY_TOKEN: ${{ inputs.telemetry-token }}
       run: |
-        set -euo pipefail
+        set -uo pipefail
+
+        STATUS="ok"
+        MESSAGE="no_forbidden_patterns"
+        BLOCKED=0
+        BLOCKED_FILES=()
 
         if [[ ! -s forbidden-patterns.txt ]]; then
           echo "No FORBIDDEN patterns found, skipping check"
-          STATUS="ok"
-          MESSAGE="no_forbidden_patterns"
-          BLOCKED=0
-          BLOCKED_FILES=()
         else
           # Parse patterns into blocked and exceptions
           BLOCKED_PATTERNS=()
@@ -79,9 +80,6 @@ runs:
             fi
             return 1
           }
-
-          BLOCKED=0
-          BLOCKED_FILES=()
 
           while IFS= read -r FILE; do
             is_blocked=false
@@ -134,52 +132,58 @@ runs:
           fi
         fi
 
-        # ---------- Telemetry (optional) ----------
+        # ---------- Telemetry ----------
         if [[ -n "${TELEMETRY_URL:-}" ]]; then
           echo "Sending telemetry to $TELEMETRY_URL"
 
           # Build JSON array of blocked files
-          if (( ${#BLOCKED_FILES[@]} > 0 )); then
-            BLOCKED_JSON=$(printf '%s\n' "${BLOCKED_FILES[@]}" | python3 - << 'PY'
-import json, sys
-lines = [l.strip() for l in sys.stdin if l.strip()]
-print(json.dumps(lines))
-PY
-)
-          else
-            BLOCKED_JSON="[]"
-          fi
+          BLOCKED_JSON="["
+          first=true
+          for f in "${BLOCKED_FILES[@]}"; do
+            if [[ "$first" == true ]]; then
+              first=false
+            else
+              BLOCKED_JSON+=","
+            fi
+            # Escape any quotes in filename
+            escaped_f="${f//\"/\\\"}"
+            BLOCKED_JSON+="\"${escaped_f}\""
+          done
+          BLOCKED_JSON+="]"
 
-          # Build payload
-          read -r -d '' PAYLOAD <<EOF || true
+          # Build payload using jq for proper JSON encoding
+          PAYLOAD=$(cat <<EOF
 {
-  "repository": "${GITHUB_REPOSITORY}",
-  "workflow": "${GITHUB_WORKFLOW}",
-  "run_id": "${GITHUB_RUN_ID}",
-  "run_number": "${GITHUB_RUN_NUMBER}",
-  "sha": "${GITHUB_SHA}",
-  "actor": "${GITHUB_ACTOR}",
+  "repository": "${GITHUB_REPOSITORY:-unknown}",
+  "workflow": "${GITHUB_WORKFLOW:-unknown}",
+  "run_id": "${GITHUB_RUN_ID:-unknown}",
+  "run_number": "${GITHUB_RUN_NUMBER:-unknown}",
+  "sha": "${GITHUB_SHA:-unknown}",
+  "ref": "${GITHUB_REF:-unknown}",
+  "actor": "${GITHUB_ACTOR:-unknown}",
   "status": "${STATUS}",
   "message": "${MESSAGE}",
   "blocked_files": ${BLOCKED_JSON},
   "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 }
 EOF
+)
 
-          # Optional auth header
-          AUTH_HEADER=()
+          # Build curl command with optional auth header
+          CURL_ARGS=(-sS -X POST "$TELEMETRY_URL" -H "Content-Type: application/json")
           if [[ -n "${TELEMETRY_TOKEN:-}" ]]; then
-            AUTH_HEADER=(-H "Authorization: Bearer ${TELEMETRY_TOKEN}")
+            CURL_ARGS+=(-H "Authorization: Bearer ${TELEMETRY_TOKEN}")
           fi
 
-          # Fire-and-forget: telemetry failure must NOT break the check logic
-          curl -sS -X POST "$TELEMETRY_URL" \
-            -H "Content-Type: application/json" \
-            "${AUTH_HEADER[@]}" \
-            -d "$PAYLOAD" || echo "Telemetry send failed (ignored)."
+          # Fire-and-forget: telemetry failure must NOT break the check
+          if curl "${CURL_ARGS[@]}" -d "$PAYLOAD" --max-time 10; then
+            echo "Telemetry sent successfully."
+          else
+            echo "::warning::Telemetry send failed (ignored)."
+          fi
         else
           echo "No telemetry-url configured; skipping telemetry."
         fi
         # ---------- End telemetry ----------
 
-        exit "$BLOCKED"
+        exit $BLOCKED
