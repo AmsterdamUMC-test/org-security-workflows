@@ -26,7 +26,6 @@ runs:
     - name: Extract FORBIDDEN patterns
       shell: bash
       run: |
-        # Extract blocked and exception patterns separately
         awk '
           /^# BEGIN FORBIDDEN/ { capture=1; next }
           /^# END FORBIDDEN/   { capture=0; next }
@@ -52,7 +51,6 @@ runs:
         if [[ ! -s forbidden-patterns.txt ]]; then
           echo "No FORBIDDEN patterns found, skipping check"
         else
-          # Parse patterns into blocked and exceptions
           BLOCKED_PATTERNS=()
           EXCEPTION_PATTERNS=()
 
@@ -65,7 +63,6 @@ runs:
             fi
           done < forbidden-patterns.txt
 
-          # Function to check if filename matches a glob pattern
           matches_pattern() {
             local file="$1"
             local pattern="$2"
@@ -85,7 +82,6 @@ runs:
             is_blocked=false
             is_exception=false
 
-            # Check if file matches any blocked pattern
             for pattern in "${BLOCKED_PATTERNS[@]}"; do
               if matches_pattern "$FILE" "$pattern"; then
                 is_blocked=true
@@ -93,7 +89,6 @@ runs:
               fi
             done
 
-            # If blocked, check if it's an exception
             if [[ "$is_blocked" == true ]]; then
               for pattern in "${EXCEPTION_PATTERNS[@]}"; do
                 if matches_pattern "$FILE" "$pattern"; then
@@ -103,7 +98,6 @@ runs:
               done
             fi
 
-            # Add to blocked list if blocked and not an exception
             if [[ "$is_blocked" == true && "$is_exception" == false ]]; then
               echo "::error file=$FILE::Blocked by FORBIDDEN patterns in central-gitignore.txt"
               BLOCKED_FILES+=("$FILE")
@@ -145,37 +139,21 @@ runs:
             else
               BLOCKED_JSON+=","
             fi
-            # Escape any quotes in filename
             escaped_f="${f//\"/\\\"}"
             BLOCKED_JSON+="\"${escaped_f}\""
           done
           BLOCKED_JSON+="]"
 
-          # Build payload using jq for proper JSON encoding
-          PAYLOAD=$(cat <<EOF
-{
-  "repository": "${GITHUB_REPOSITORY:-unknown}",
-  "workflow": "${GITHUB_WORKFLOW:-unknown}",
-  "run_id": "${GITHUB_RUN_ID:-unknown}",
-  "run_number": "${GITHUB_RUN_NUMBER:-unknown}",
-  "sha": "${GITHUB_SHA:-unknown}",
-  "ref": "${GITHUB_REF:-unknown}",
-  "actor": "${GITHUB_ACTOR:-unknown}",
-  "status": "${STATUS}",
-  "message": "${MESSAGE}",
-  "blocked_files": ${BLOCKED_JSON},
-  "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-}
-EOF
-)
+          # Build payload as single line to avoid YAML issues
+          TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          PAYLOAD="{\"repository\":\"${GITHUB_REPOSITORY:-unknown}\",\"workflow\":\"${GITHUB_WORKFLOW:-unknown}\",\"run_id\":\"${GITHUB_RUN_ID:-unknown}\",\"run_number\":\"${GITHUB_RUN_NUMBER:-unknown}\",\"sha\":\"${GITHUB_SHA:-unknown}\",\"ref\":\"${GITHUB_REF:-unknown}\",\"actor\":\"${GITHUB_ACTOR:-unknown}\",\"status\":\"${STATUS}\",\"message\":\"${MESSAGE}\",\"blocked_files\":${BLOCKED_JSON},\"timestamp\":\"${TIMESTAMP}\"}"
 
-          # Build curl command with optional auth header
+          # Build curl command
           CURL_ARGS=(-sS -X POST "$TELEMETRY_URL" -H "Content-Type: application/json")
           if [[ -n "${TELEMETRY_TOKEN:-}" ]]; then
             CURL_ARGS+=(-H "Authorization: Bearer ${TELEMETRY_TOKEN}")
           fi
 
-          # Fire-and-forget: telemetry failure must NOT break the check
           if curl "${CURL_ARGS[@]}" -d "$PAYLOAD" --max-time 10; then
             echo "Telemetry sent successfully."
           else
@@ -184,6 +162,5 @@ EOF
         else
           echo "No telemetry-url configured; skipping telemetry."
         fi
-        # ---------- End telemetry ----------
 
         exit $BLOCKED
