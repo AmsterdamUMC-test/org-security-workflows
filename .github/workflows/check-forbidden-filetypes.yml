@@ -13,4 +13,4 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run filetype check
-        uses: bavadeve/org-security-workflows/filetype-check@main
+        uses: AmsterdamUMC-test/org-security-workflows/filetype-check@main
