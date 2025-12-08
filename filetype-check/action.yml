@@ -160,15 +160,12 @@ runs:
             repo: repo,
             event_type: 'security_alert',
             client_payload: {
-              source_repository: process.env.GITHUB_REPOSITORY,
-              workflow: process.env.GITHUB_WORKFLOW,
+              repository: process.env.GITHUB_REPOSITORY,
               run_id: process.env.GITHUB_RUN_ID,
-              run_number: process.env.GITHUB_RUN_NUMBER,
               sha: process.env.GITHUB_SHA,
               ref: process.env.GITHUB_REF,
               actor: process.env.GITHUB_ACTOR,
               status: process.env.STATUS,
-              message: process.env.MESSAGE,
               blocked_files: blockedFiles,
               timestamp: new Date().toISOString()
             }
