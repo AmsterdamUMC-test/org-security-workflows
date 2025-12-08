@@ -199,6 +199,7 @@ git push --no-verify
 ```
 
 ### For testing
+
 ```bash
 touch dummy.csv # create dummy data file
 git add dummy.csv # should be stopped by .gitignore
@@ -207,6 +208,8 @@ git commit -m 'test data upload' # should be stopped by pre-commit
 git commit --no-verify -m 'test data upload' # push through pre-commit
 git push origin main # should be stopped by pre-push
 git push origin main --no-verify # push through pre-push --> file is uploaded and should trigger a GitHub Action
+```
+
 ---
 
 ## Notes for Windows / GitHub Desktop Users
