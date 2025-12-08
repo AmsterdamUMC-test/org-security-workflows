@@ -3,6 +3,9 @@
 # Pre-push hook: checks files being pushed against FORBIDDEN patterns only
 # Downloads central-gitignore.txt and extracts FORBIDDEN sections
 #
+# When run via pre-commit, uses PRE_COMMIT_FROM_REF and PRE_COMMIT_TO_REF
+# environment variables to determine which files to check.
+#
 set -euo pipefail
 
 RULES_URL="https://raw.githubusercontent.com/AmsterdamUMC-test/org-security-workflows/main/central-gitignore.txt"
@@ -72,66 +75,76 @@ matches_pattern() {
   return 1
 }
 
-# Read stdin for push info (provided by git)
-# Format: <local ref> <local sha> <remote ref> <remote sha>
-while read -r local_ref local_sha remote_ref remote_sha; do
-  # Handle new branch (remote_sha is all zeros)
-  if [[ "$remote_sha" == "0000000000000000000000000000000000000000" ]]; then
-    FILES=$(git ls-tree -r --name-only "$local_sha")
+# Get files to check
+# pre-commit sets PRE_COMMIT_FROM_REF and PRE_COMMIT_TO_REF for pre-push
+if [[ -n "${PRE_COMMIT_FROM_REF:-}" && -n "${PRE_COMMIT_TO_REF:-}" ]]; then
+  # Running via pre-commit
+  if [[ "$PRE_COMMIT_FROM_REF" == "0000000000000000000000000000000000000000" ]]; then
+    # New branch
+    FILES=$(git ls-tree -r --name-only "$PRE_COMMIT_TO_REF")
   else
-    FILES=$(git diff --name-only "$remote_sha..$local_sha" 2>/dev/null || git ls-tree -r --name-only "$local_sha")
+    FILES=$(git diff --name-only "$PRE_COMMIT_FROM_REF..$PRE_COMMIT_TO_REF" 2>/dev/null || echo "")
   fi
-
-  if [[ -z "$FILES" ]]; then
-    continue
-  fi
-
-  BLOCKED_FILES=()
-
-  for FILE in $FILES; do
-    is_blocked=false
-    is_exception=false
-
-    for pattern in "${BLOCKED_PATTERNS[@]}"; do
-      if matches_pattern "$FILE" "$pattern"; then
-        is_blocked=true
-        break
-      fi
-    done
-
-    if [[ "$is_blocked" == true ]]; then
-      for pattern in "${EXCEPTION_PATTERNS[@]}"; do
-        if matches_pattern "$FILE" "$pattern"; then
-          is_exception=true
-          break
-        fi
-      done
+else
+  # Running as standalone hook - read from stdin
+  while read -r local_ref local_sha remote_ref remote_sha; do
+    if [[ "$remote_sha" == "0000000000000000000000000000000000000000" ]]; then
+      FILES=$(git ls-tree -r --name-only "$local_sha")
+    else
+      FILES=$(git diff --name-only "$remote_sha..$local_sha" 2>/dev/null || echo "")
     fi
+  done
+fi
 
-    if [[ "$is_blocked" == true && "$is_exception" == false ]]; then
-      BLOCKED_FILES+=("$FILE")
+if [[ -z "${FILES:-}" ]]; then
+  exit 0
+fi
+
+BLOCKED_FILES=()
+
+for FILE in $FILES; do
+  is_blocked=false
+  is_exception=false
+
+  for pattern in "${BLOCKED_PATTERNS[@]}"; do
+    if matches_pattern "$FILE" "$pattern"; then
+      is_blocked=true
+      break
     fi
   done
 
-  if (( ${#BLOCKED_FILES[@]} > 0 )); then
-    echo ""
-    echo -e "\033[1;31m══════════════════════════════════════════════════════════════\033[0m"
-    echo -e "\033[1;31m  ERROR: Forbidden file types detected!\033[0m"
-    echo -e "\033[1;31m══════════════════════════════════════════════════════════════\033[0m"
-    echo ""
-    echo "The following files match forbidden data patterns:"
-    echo ""
-    for f in "${BLOCKED_FILES[@]}"; do
-      echo -e "  \033[33m✗\033[0m $f"
+  if [[ "$is_blocked" == true ]]; then
+    for pattern in "${EXCEPTION_PATTERNS[@]}"; do
+      if matches_pattern "$FILE" "$pattern"; then
+        is_exception=true
+        break
+      fi
     done
-    echo ""
-    echo "These file types are blocked to prevent accidental data leaks."
-    echo ""
-    echo "If this is a false positive, contact your data steward."
-    echo "To bypass (NOT recommended): git push --no-verify"
-    echo ""
-    exit 1
+  fi
+
+  if [[ "$is_blocked" == true && "$is_exception" == false ]]; then
+    BLOCKED_FILES+=("$FILE")
   fi
 done
+
+if (( ${#BLOCKED_FILES[@]} > 0 )); then
+  echo ""
+  echo -e "\033[1;31m══════════════════════════════════════════════════════════════\033[0m"
+  echo -e "\033[1;31m  ERROR: Forbidden file types detected!\033[0m"
+  echo -e "\033[1;31m══════════════════════════════════════════════════════════════\033[0m"
+  echo ""
+  echo "The following files match forbidden data patterns:"
+  echo ""
+  for f in "${BLOCKED_FILES[@]}"; do
+    echo -e "  \033[33m✗\033[0m $f"
+  done
+  echo ""
+  echo "These file types are blocked to prevent accidental data leaks."
+  echo ""
+  echo "If this is a false positive, contact your data steward."
+  echo "To bypass (NOT recommended): git push --no-verify"
+  echo ""
+  exit 1
+fi
 
 exit 0
