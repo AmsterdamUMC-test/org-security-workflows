@@ -21,7 +21,7 @@ It is part of a broader effort to support researchers in securely managing softw
 - `pre-commit-check/check-filetypes.sh`  
   A shell-based pre-commit hook to block commits that include forbidden file types. Also uses the shared extension list.
 
-### Pre-commit Hook
+### Pre-push Hook
 
 - `pre-push-check/check-filetypes-prepush.sh`  
   A shell-based pre-commit hook to block commits that include forbidden file types. Also uses the shared extension list.
