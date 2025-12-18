@@ -57,6 +57,9 @@ ALL_STREETS=$(cat "$STREETNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
 # Build patterns for street name checks
 LONG_STREETS=$(awk 'length($0) >= 10' "$STREETNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
 
+# Dutch street suffixes
+STREET_SUFFIXES="straat|laan|weg|plein|gracht|kade|singel|dijk|steeg|pad|dreef|boulevard"
+
 # Initialize violation flag
 VIOLATIONS_FOUND=0
 
@@ -82,24 +85,48 @@ check_file_for_personal_info() {
     # PHASE 1: Fast check - does file contain ANY first name?
     if grep -iqE "\b($ALL_FIRSTNAMES)\b" "$file"; then
         # PHASE 2: Check for first name followed by capitalized word (potential full name)
-        if grep -qE "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" "$file"; then
-            echo -e "  ${RED}[Potential Full Name]${NC} First name followed by capitalized word in ${YELLOW}$file${NC}:"
-            grep -nE "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" "$file" | head -3 | while IFS=: read -r line_num content; do
-                echo -e "    Line $line_num: $content"
-            done
-            found_violation=1
+        # BUT exclude matches that are street names (contain street suffixes)
+        
+        # First, get lines with potential names
+        POTENTIAL_NAMES=$(grep -iE "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" "$file" || true)
+        
+        if [[ -n "$POTENTIAL_NAMES" ]]; then
+            # Filter out lines that contain street suffixes
+            FILTERED_NAMES=$(echo "$POTENTIAL_NAMES" | grep -ivE "($STREET_SUFFIXES)" || true)
+            
+            if [[ -n "$FILTERED_NAMES" ]]; then
+                echo -e "  ${RED}[Potential Full Name]${NC} First name followed by capitalized word in ${YELLOW}$file${NC}:"
+                echo "$FILTERED_NAMES" | head -3 | while IFS= read -r line; do
+                    # Get line number for this match
+                    LINE_NUM=$(grep -nF "$line" "$file" | head -1 | cut -d: -f1)
+                    echo -e "    Line $LINE_NUM: $line"
+                done
+                found_violation=1
+            fi
         fi
     fi
     
     # PHASE 1: Fast check - does file contain ANY surname?
     if [[ $found_violation -eq 0 ]] && grep -iqE "\b($ALL_SURNAMES)\b" "$file"; then
         # PHASE 2: Check for capitalized word followed by surname (potential full name)
-        if grep -qE "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" "$file"; then
-            echo -e "  ${RED}[Potential Full Name]${NC} Capitalized word followed by surname in ${YELLOW}$file${NC}:"
-            grep -nE "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" "$file" | head -3 | while IFS=: read -r line_num content; do
-                echo -e "    Line $line_num: $content"
-            done
-            found_violation=1
+        # BUT exclude matches that are street names (contain street suffixes)
+        
+        # First, get lines with potential names
+        POTENTIAL_NAMES=$(grep -iE "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" "$file" || true)
+        
+        if [[ -n "$POTENTIAL_NAMES" ]]; then
+            # Filter out lines that contain street suffixes
+            FILTERED_NAMES=$(echo "$POTENTIAL_NAMES" | grep -ivE "($STREET_SUFFIXES)" || true)
+            
+            if [[ -n "$FILTERED_NAMES" ]]; then
+                echo -e "  ${RED}[Potential Full Name]${NC} Capitalized word followed by surname in ${YELLOW}$file${NC}:"
+                echo "$FILTERED_NAMES" | head -3 | while IFS= read -r line; do
+                    # Get line number for this match
+                    LINE_NUM=$(grep -nF "$line" "$file" | head -1 | cut -d: -f1)
+                    echo -e "    Line $LINE_NUM: $line"
+                done
+                found_violation=1
+            fi
         fi
     fi
     
