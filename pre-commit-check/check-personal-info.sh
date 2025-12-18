@@ -107,13 +107,17 @@ check_file_for_personal_info() {
         fi
     done < "$STREETNAMES_FILE"
     
-    return $found_violation
+    if [[ $found_violation -eq 1 ]]; then
+        return 1  # Return 1 = found violation (error/failure)
+    else
+        return 0  # Return 0 = no violation (success)
+    fi
 }
 
 # Check each staged file
 for file in $STAGED_FILES; do
     if [[ -f "$file" ]]; then
-        if check_file_for_personal_info "$file"; then
+        if ! check_file_for_personal_info "$file"; then
             VIOLATIONS_FOUND=1
         fi
     fi
@@ -140,17 +144,3 @@ else
     echo -e "${GREEN}✓ No personal information detected in staged files${NC}"
     exit 0
 fi
-```
-
-**Key changes:**
-1. Removed the "Checking file..." line-by-line progress (cleaner output)
-2. Now shows **filename** in yellow with each violation
-3. Shows **line number** and **content** for each match
-4. Better formatting with indentation
-5. Simplified the logic to return violation status directly
-
-Now the output will look like:
-```
-🔍 Scanning staged files for personal information...
-  [Street Name] 'Dam' found in .pre-commit-config.yaml:
-    Line 2:   - repo: https://github.com/AmsterdamUMC-test/org-security-workflows
