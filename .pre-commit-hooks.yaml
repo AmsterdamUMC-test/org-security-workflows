@@ -13,3 +13,11 @@
   stages: [pre-push]
   always_run: true
   pass_filenames: false
+
+- id: check-personal-info
+  name: Check for personal information (names, addresses, patient IDs)
+  entry: pre-commit-check/check-personal-info.sh
+  language: script
+  stages: [pre-commit]
+  files: .*
+  always_run: true

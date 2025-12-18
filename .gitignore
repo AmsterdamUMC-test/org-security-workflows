@@ -196,9 +196,3 @@ outputs/
 figures/
 results/
 reports/
-
-# --- Data folder structure ---
-# Block contents but allow folder structure files
-/data/*
-!data/.gitkeep
-!data/README.md
