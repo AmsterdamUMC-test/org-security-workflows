@@ -71,29 +71,96 @@ check_file_for_personal_info() {
         found_violation=1
     fi
     
-    # Check for first names (case-insensitive)
+    # Check for first names (case-insensitive, with context awareness)
     while IFS= read -r name; do
-        if [[ -n "$name" ]] && grep -iqw "$name" "$file"; then
-            echo -e "  ${RED}[First Name]${NC} '$name' found in ${YELLOW}$file${NC}:"
-            grep -inw "$name" "$file" | head -3 | while IFS=: read -r line_num content; do
-                echo -e "    Line $line_num: $content"
-            done
-            found_violation=1
-            break  # Only report first match to avoid spam
+        if [[ -n "$name" ]]; then
+            # For short names (< 4 chars), look for pattern: name + capitalized word
+            if [[ ${#name} -lt 4 ]]; then
+                # Look for: short name + space + capitalized word (5+ chars)
+                if grep -qE "\b$name\s+[A-Z][a-z]{4,}" "$file"; then
+                    echo -e "  ${RED}[Potential Full Name]${NC} '$name' followed by capitalized word in ${YELLOW}$file${NC}:"
+                    grep -nE "\b$name\s+[A-Z][a-z]{4,}" "$file" | head -3 | while IFS=: read -r line_num content; do
+                        echo -e "    Line $line_num: $content"
+                    done
+                    found_violation=1
+                    break
+                fi
+                continue
+            fi
+            
+            # For medium-length names (4-6 chars), require surname context
+            if [[ ${#name} -le 6 ]]; then
+                # Check if name appears with any surname from the list
+                while IFS= read -r surname; do
+                    if [[ -n "$surname" ]] && grep -iqE "$name[[:space:]]+$surname" "$file"; then
+                        echo -e "  ${RED}[Full Name]${NC} '$name $surname' found in ${YELLOW}$file${NC}:"
+                        grep -inE "$name[[:space:]]+$surname" "$file" | head -3 | while IFS=: read -r line_num content; do
+                            echo -e "    Line $line_num: $content"
+                        done
+                        found_violation=1
+                        break 2  # Break both loops
+                    fi
+                done < "$SURNAMES_FILE"
+            else
+                # For longer names (7+ chars), flag individually
+                if grep -iqw "$name" "$file"; then
+                    echo -e "  ${RED}[First Name]${NC} '$name' found in ${YELLOW}$file${NC}:"
+                    grep -inw "$name" "$file" | head -3 | while IFS=: read -r line_num content; do
+                        echo -e "    Line $line_num: $content"
+                    done
+                    found_violation=1
+                    break
+                fi
+            fi
         fi
     done < "$FIRSTNAMES_FILE"
     
-    # Check for surnames (case-insensitive)
-    while IFS= read -r surname; do
-        if [[ -n "$surname" ]] && grep -iqw "$surname" "$file"; then
-            echo -e "  ${RED}[Surname]${NC} '$surname' found in ${YELLOW}$file${NC}:"
-            grep -inw "$surname" "$file" | head -3 | while IFS=: read -r line_num content; do
-                echo -e "    Line $line_num: $content"
-            done
-            found_violation=1
-            break  # Only report first match to avoid spam
-        fi
-    done < "$SURNAMES_FILE"
+    # Check for surnames (case-insensitive, with context awareness)
+    # Only check surnames that haven't already been caught in full name check
+    if [[ $found_violation -eq 0 ]]; then
+        while IFS= read -r surname; do
+            if [[ -n "$surname" ]]; then
+                # For short surnames (< 5 chars), look for pattern: capitalized word + surname
+                if [[ ${#surname} -lt 5 ]]; then
+                    # Look for: capitalized word (5+ chars) + space + short surname
+                    if grep -qE "[A-Z][a-z]{4,}\s+\b$surname\b" "$file"; then
+                        echo -e "  ${RED}[Potential Full Name]${NC} Capitalized word followed by '$surname' in ${YELLOW}$file${NC}:"
+                        grep -nE "[A-Z][a-z]{4,}\s+\b$surname\b" "$file" | head -3 | while IFS=: read -r line_num content; do
+                            echo -e "    Line $line_num: $content"
+                        done
+                        found_violation=1
+                        break
+                    fi
+                    continue
+                fi
+                
+                # For medium-length surnames (5-7 chars), require first name context
+                if [[ ${#surname} -le 7 ]]; then
+                    # Check if surname appears with any first name from the list
+                    while IFS= read -r name; do
+                        if [[ -n "$name" ]] && grep -iqE "$name[[:space:]]+$surname" "$file"; then
+                            echo -e "  ${RED}[Full Name]${NC} '$name $surname' found in ${YELLOW}$file${NC}:"
+                            grep -inE "$name[[:space:]]+$surname" "$file" | head -3 | while IFS=: read -r line_num content; do
+                                echo -e "    Line $line_num: $content"
+                            done
+                            found_violation=1
+                            break 2  # Break both loops
+                        fi
+                    done < "$FIRSTNAMES_FILE"
+                else
+                    # For longer surnames (8+ chars), flag individually (like "Yildirim", "Kowalski")
+                    if grep -iqw "$surname" "$file"; then
+                        echo -e "  ${RED}[Surname]${NC} '$surname' found in ${YELLOW}$file${NC}:"
+                        grep -inw "$surname" "$file" | head -3 | while IFS=: read -r line_num content; do
+                            echo -e "    Line $line_num: $content"
+                        done
+                        found_violation=1
+                        break
+                    fi
+                fi
+            fi
+        done < "$SURNAMES_FILE"
+    fi
     
     # Check for street names (require either: street + number, OR long street names)
     while IFS= read -r street; do
