@@ -95,15 +95,33 @@ check_file_for_personal_info() {
         fi
     done < "$SURNAMES_FILE"
     
-    # Check for street names (case-insensitive, allow partial matches)
+    # Check for street names (require either: street + number, OR long street names)
     while IFS= read -r street; do
-        if [[ -n "$street" ]] && grep -iq "$street" "$file"; then
-            echo -e "  ${RED}[Street Name]${NC} '$street' found in ${YELLOW}$file${NC}:"
-            grep -in "$street" "$file" | head -3 | while IFS=: read -r line_num content; do
-                echo -e "    Line $line_num: $content"
-            done
-            found_violation=1
-            break  # Only report first match to avoid spam
+        if [[ -n "$street" ]]; then
+            # Skip very short street names to avoid false positives (e.g., "Dam")
+            if [[ ${#street} -lt 8 ]]; then
+                continue
+            fi
+            
+            # Check for street name followed by a house number (strong indicator of real address)
+            if grep -iqE "$street[[:space:]]+[0-9]" "$file"; then
+                echo -e "  ${RED}[Street + Number]${NC} '$street' with house number found in ${YELLOW}$file${NC}:"
+                grep -inE "$street[[:space:]]+[0-9]" "$file" | head -3 | while IFS=: read -r line_num content; do
+                    echo -e "    Line $line_num: $content"
+                done
+                found_violation=1
+                break
+            fi
+            
+            # For longer street names (10+ chars), flag even without number
+            if [[ ${#street} -ge 10 ]] && grep -iq "$street" "$file"; then
+                echo -e "  ${RED}[Street Name]${NC} '$street' found in ${YELLOW}$file${NC}:"
+                grep -in "$street" "$file" | head -3 | while IFS=: read -r line_num content; do
+                    echo -e "    Line $line_num: $content"
+                done
+                found_violation=1
+                break
+            fi
         fi
     done < "$STREETNAMES_FILE"
     
