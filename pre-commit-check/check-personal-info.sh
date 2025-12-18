@@ -54,16 +54,7 @@ ALL_FIRSTNAMES=$(cat "$FIRSTNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
 ALL_SURNAMES=$(cat "$SURNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
 ALL_STREETS=$(cat "$STREETNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
 
-# Build category-specific patterns for context checks
-SHORT_FIRSTNAMES=$(awk 'length($0) < 4' "$FIRSTNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
-MEDIUM_FIRSTNAMES=$(awk 'length($0) >= 4 && length($0) <= 6' "$FIRSTNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
-LONG_FIRSTNAMES=$(awk 'length($0) >= 7' "$FIRSTNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
-
-SHORT_SURNAMES=$(awk 'length($0) < 5' "$SURNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
-MEDIUM_SURNAMES=$(awk 'length($0) >= 5 && length($0) <= 7' "$SURNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
-LONG_SURNAMES=$(awk 'length($0) >= 8' "$SURNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
-
-SHORT_STREETS=$(awk 'length($0) < 8' "$STREETNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
+# Build patterns for street name checks
 LONG_STREETS=$(awk 'length($0) >= 10' "$STREETNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
 
 # Initialize violation flag
@@ -90,30 +81,10 @@ check_file_for_personal_info() {
     
     # PHASE 1: Fast check - does file contain ANY first name?
     if grep -iqE "\b($ALL_FIRSTNAMES)\b" "$file"; then
-        # PHASE 2: Context-aware checking for first names
-        
-        # Check short first names (< 4 chars) - require capitalized word after
-        if [[ -n "$SHORT_FIRSTNAMES" ]] && grep -qE "\b($SHORT_FIRSTNAMES)\s+[A-Z][a-z]{4,}" "$file"; then
-            echo -e "  ${RED}[Potential Full Name]${NC} Short first name followed by capitalized word in ${YELLOW}$file${NC}:"
-            grep -nE "\b($SHORT_FIRSTNAMES)\s+[A-Z][a-z]{4,}" "$file" | head -3 | while IFS=: read -r line_num content; do
-                echo -e "    Line $line_num: $content"
-            done
-            found_violation=1
-        fi
-        
-        # Check medium first names (4-6 chars) - require known surname
-        if [[ -n "$MEDIUM_FIRSTNAMES" ]] && grep -iqE "\b($MEDIUM_FIRSTNAMES)\s+($ALL_SURNAMES)\b" "$file"; then
-            echo -e "  ${RED}[Full Name]${NC} First name with known surname in ${YELLOW}$file${NC}:"
-            grep -inE "\b($MEDIUM_FIRSTNAMES)\s+($ALL_SURNAMES)\b" "$file" | head -3 | while IFS=: read -r line_num content; do
-                echo -e "    Line $line_num: $content"
-            done
-            found_violation=1
-        fi
-        
-        # Check long first names (7+ chars) - flag individually
-        if [[ -n "$LONG_FIRSTNAMES" ]] && grep -iqwE "($LONG_FIRSTNAMES)" "$file"; then
-            echo -e "  ${RED}[First Name]${NC} Long first name found in ${YELLOW}$file${NC}:"
-            grep -inwE "($LONG_FIRSTNAMES)" "$file" | head -3 | while IFS=: read -r line_num content; do
+        # PHASE 2: Check for first name followed by capitalized word (potential full name)
+        if grep -qE "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{3,}" "$file"; then
+            echo -e "  ${RED}[Potential Full Name]${NC} First name followed by capitalized word in ${YELLOW}$file${NC}:"
+            grep -nE "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{3,}" "$file" | head -3 | while IFS=: read -r line_num content; do
                 echo -e "    Line $line_num: $content"
             done
             found_violation=1
@@ -122,30 +93,10 @@ check_file_for_personal_info() {
     
     # PHASE 1: Fast check - does file contain ANY surname?
     if [[ $found_violation -eq 0 ]] && grep -iqE "\b($ALL_SURNAMES)\b" "$file"; then
-        # PHASE 2: Context-aware checking for surnames
-        
-        # Check short surnames (< 5 chars) - require capitalized word before
-        if [[ -n "$SHORT_SURNAMES" ]] && grep -qE "[A-Z][a-z]{4,}\s+\b($SHORT_SURNAMES)\b" "$file"; then
-            echo -e "  ${RED}[Potential Full Name]${NC} Capitalized word followed by short surname in ${YELLOW}$file${NC}:"
-            grep -nE "[A-Z][a-z]{4,}\s+\b($SHORT_SURNAMES)\b" "$file" | head -3 | while IFS=: read -r line_num content; do
-                echo -e "    Line $line_num: $content"
-            done
-            found_violation=1
-        fi
-        
-        # Check medium surnames (5-7 chars) - require known first name
-        if [[ -n "$MEDIUM_SURNAMES" ]] && grep -iqE "\b($ALL_FIRSTNAMES)\s+($MEDIUM_SURNAMES)\b" "$file"; then
-            echo -e "  ${RED}[Full Name]${NC} Known first name with surname in ${YELLOW}$file${NC}:"
-            grep -inE "\b($ALL_FIRSTNAMES)\s+($MEDIUM_SURNAMES)\b" "$file" | head -3 | while IFS=: read -r line_num content; do
-                echo -e "    Line $line_num: $content"
-            done
-            found_violation=1
-        fi
-        
-        # Check long surnames (8+ chars) - flag individually
-        if [[ -n "$LONG_SURNAMES" ]] && grep -iqwE "($LONG_SURNAMES)" "$file"; then
-            echo -e "  ${RED}[Surname]${NC} Long surname found in ${YELLOW}$file${NC}:"
-            grep -inwE "($LONG_SURNAMES)" "$file" | head -3 | while IFS=: read -r line_num content; do
+        # PHASE 2: Check for capitalized word followed by surname (potential full name)
+        if grep -qE "[A-Z][a-z]{3,}\s+\b($ALL_SURNAMES)\b" "$file"; then
+            echo -e "  ${RED}[Potential Full Name]${NC} Capitalized word followed by surname in ${YELLOW}$file${NC}:"
+            grep -nE "[A-Z][a-z]{3,}\s+\b($ALL_SURNAMES)\b" "$file" | head -3 | while IFS=: read -r line_num content; do
                 echo -e "    Line $line_num: $content"
             done
             found_violation=1
