@@ -51,33 +51,34 @@ fi
 
 # Initialize violation flag
 VIOLATIONS_FOUND=0
-VIOLATION_DETAILS=""
 
 # Function to check for matches in a file
 check_file_for_personal_info() {
     local file=$1
-    local violations=""
+    local found_violation=0
     
     # Skip binary files
-    if file "$file" | grep -q "text"; then
-        :
-    else
+    if ! file "$file" | grep -q "text"; then
         return 0
     fi
     
     # Check for 7-digit patient IDs
-    if grep -iqE '\b[0-9]{7}\b' "$file"; then
-        local matches=$(grep -inE '\b[0-9]{7}\b' "$file" | head -5)
-        violations="${violations}\n  ${RED}[Patient ID]${NC} 7-digit numbers found:"
-        violations="${violations}\n${matches}"
+    if grep -qE '\b[0-9]{7}\b' "$file"; then
+        echo -e "  ${RED}[Patient ID]${NC} 7-digit numbers found in ${YELLOW}$file${NC}:"
+        grep -nE '\b[0-9]{7}\b' "$file" | head -5 | while IFS=: read -r line_num content; do
+            echo -e "    Line $line_num: $content"
+        done
+        found_violation=1
     fi
     
     # Check for first names (case-insensitive)
     while IFS= read -r name; do
         if [[ -n "$name" ]] && grep -iqw "$name" "$file"; then
-            local matches=$(grep -inwH "$name" "$file" | head -3)
-            violations="${violations}\n  ${RED}[First Name]${NC} '$name' found:"
-            violations="${violations}\n${matches}"
+            echo -e "  ${RED}[First Name]${NC} '$name' found in ${YELLOW}$file${NC}:"
+            grep -inw "$name" "$file" | head -3 | while IFS=: read -r line_num content; do
+                echo -e "    Line $line_num: $content"
+            done
+            found_violation=1
             break  # Only report first match to avoid spam
         fi
     done < "$FIRSTNAMES_FILE"
@@ -85,9 +86,11 @@ check_file_for_personal_info() {
     # Check for surnames (case-insensitive)
     while IFS= read -r surname; do
         if [[ -n "$surname" ]] && grep -iqw "$surname" "$file"; then
-            local matches=$(grep -inwH "$surname" "$file" | head -3)
-            violations="${violations}\n  ${RED}[Surname]${NC} '$surname' found:"
-            violations="${violations}\n${matches}"
+            echo -e "  ${RED}[Surname]${NC} '$surname' found in ${YELLOW}$file${NC}:"
+            grep -inw "$surname" "$file" | head -3 | while IFS=: read -r line_num content; do
+                echo -e "    Line $line_num: $content"
+            done
+            found_violation=1
             break  # Only report first match to avoid spam
         fi
     done < "$SURNAMES_FILE"
@@ -95,31 +98,23 @@ check_file_for_personal_info() {
     # Check for street names (case-insensitive, allow partial matches)
     while IFS= read -r street; do
         if [[ -n "$street" ]] && grep -iq "$street" "$file"; then
-            local matches=$(grep -inH "$street" "$file" | head -3)
-            violations="${violations}\n  ${RED}[Street Name]${NC} '$street' found:"
-            violations="${violations}\n${matches}"
+            echo -e "  ${RED}[Street Name]${NC} '$street' found in ${YELLOW}$file${NC}:"
+            grep -in "$street" "$file" | head -3 | while IFS=: read -r line_num content; do
+                echo -e "    Line $line_num: $content"
+            done
+            found_violation=1
             break  # Only report first match to avoid spam
         fi
     done < "$STREETNAMES_FILE"
     
-    if [[ -n "$violations" ]]; then
-        echo -e "$violations"
-        return 1
-    fi
-    
-    return 0
+    return $found_violation
 }
 
 # Check each staged file
 for file in $STAGED_FILES; do
     if [[ -f "$file" ]]; then
-        echo -n "  Checking $file... "
         if check_file_for_personal_info "$file"; then
-            echo -e "${GREEN}✓${NC}"
-        else
-            echo -e "${RED}✗ PERSONAL INFO DETECTED${NC}"
             VIOLATIONS_FOUND=1
-            VIOLATION_DETAILS="${VIOLATION_DETAILS}\n${YELLOW}File: $file${NC}"
         fi
     fi
 done
@@ -145,3 +140,17 @@ else
     echo -e "${GREEN}✓ No personal information detected in staged files${NC}"
     exit 0
 fi
+```
+
+**Key changes:**
+1. Removed the "Checking file..." line-by-line progress (cleaner output)
+2. Now shows **filename** in yellow with each violation
+3. Shows **line number** and **content** for each match
+4. Better formatting with indentation
+5. Simplified the logic to return violation status directly
+
+Now the output will look like:
+```
+🔍 Scanning staged files for personal information...
+  [Street Name] 'Dam' found in .pre-commit-config.yaml:
+    Line 2:   - repo: https://github.com/AmsterdamUMC-test/org-security-workflows
