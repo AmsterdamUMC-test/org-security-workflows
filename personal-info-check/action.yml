@@ -1,0 +1,155 @@
+name: "Personal Information Check"
+description: "Scans for personal information (names, addresses, patient IDs) in repository files"
+inputs:
+  telemetry-pat:
+    description: "PAT token for sending telemetry"
+    required: false
+  telemetry-repo:
+    description: "Repository to send telemetry to (format: owner/repo)"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install ripgrep
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ripgrep
+
+    - name: Load reference lists
+      shell: bash
+      run: |
+        echo "Loading personal information reference lists..."
+        REFERENCE_DIR="${GITHUB_ACTION_PATH}/../personal-info-lists"
+
+        if [[ ! -f "$REFERENCE_DIR/common-dutch-firstnames.txt" ]]; then
+          echo "ERROR: First names reference file not found"
+          exit 1
+        fi
+
+        if [[ ! -f "$REFERENCE_DIR/common-dutch-surnames.txt" ]]; then
+          echo "ERROR: Surnames reference file not found"
+          exit 1
+        fi
+
+        if [[ ! -f "$REFERENCE_DIR/common-dutch-streetnames.txt" ]]; then
+          echo "ERROR: Street names reference file not found"
+          exit 1
+        fi
+
+        echo "FIRSTNAMES_FILE=$REFERENCE_DIR/common-dutch-firstnames.txt" >> $GITHUB_ENV
+        echo "SURNAMES_FILE=$REFERENCE_DIR/common-dutch-surnames.txt" >> $GITHUB_ENV
+        echo "STREETNAMES_FILE=$REFERENCE_DIR/common-dutch-streetnames.txt" >> $GITHUB_ENV
+
+    - name: Scan for personal information
+      shell: bash
+      id: scan
+      run: |
+        echo "🔍 Scanning repository for personal information..."
+
+        # Build patterns
+        ALL_FIRSTNAMES=$(cat "$FIRSTNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
+        ALL_SURNAMES=$(cat "$SURNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
+        ALL_STREETS=$(cat "$STREETNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
+        STREET_SUFFIXES="straat|laan|weg|plein|gracht|kade|singel|dijk|steeg|pad|dreef|boulevard"
+
+        VIOLATIONS_FOUND=0
+        VIOLATION_DETAILS=""
+
+        # Check for 7-digit patient IDs
+        echo "Checking for patient IDs..."
+        if rg -n '\b[0-9]{7}\b' --type-not binary 2>/dev/null; then
+          echo "::error::Found 7-digit patient IDs"
+          VIOLATIONS_FOUND=1
+          VIOLATION_DETAILS="${VIOLATION_DETAILS}Patient IDs found\n"
+        fi
+
+        # Check for first names + capitalized word (potential full names)
+        echo "Checking for first names..."
+        FIRSTNAME_MATCHES=$(rg -i -n "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" --type-not binary 2>/dev/null | grep -ivE "($STREET_SUFFIXES)" || true)
+        if [[ -n "$FIRSTNAME_MATCHES" ]]; then
+          echo "::error::Found potential full names (first name pattern)"
+          echo "$FIRSTNAME_MATCHES" | head -10
+          VIOLATIONS_FOUND=1
+          VIOLATION_DETAILS="${VIOLATION_DETAILS}Full names (first name pattern) found\n"
+        fi
+
+        # Check for capitalized word + surname (potential full names)
+        echo "Checking for surnames..."
+        SURNAME_MATCHES=$(rg -i -n "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" --type-not binary 2>/dev/null | grep -ivE "($STREET_SUFFIXES)" || true)
+        if [[ -n "$SURNAME_MATCHES" ]]; then
+          echo "::error::Found potential full names (surname pattern)"
+          echo "$SURNAME_MATCHES" | head -10
+          VIOLATIONS_FOUND=1
+          VIOLATION_DETAILS="${VIOLATION_DETAILS}Full names (surname pattern) found\n"
+        fi
+
+        # Check for addresses (street + number)
+        echo "Checking for addresses..."
+        ADDRESS_MATCHES=$(rg -i -n "($ALL_STREETS)[[:space:]]+[0-9]" --type-not binary 2>/dev/null || true)
+        if [[ -n "$ADDRESS_MATCHES" ]]; then
+          echo "::error::Found addresses (known streets)"
+          echo "$ADDRESS_MATCHES" | head -10
+          VIOLATIONS_FOUND=1
+          VIOLATION_DETAILS="${VIOLATION_DETAILS}Addresses found\n"
+        fi
+
+        # Check for street pattern + number
+        STREET_PATTERN_MATCHES=$(rg -n "\b[A-Z][a-z]{4,}($STREET_SUFFIXES)[[:space:]]+[0-9]" --type-not binary 2>/dev/null || true)
+        if [[ -n "$STREET_PATTERN_MATCHES" ]]; then
+          echo "::error::Found addresses (street pattern)"
+          echo "$STREET_PATTERN_MATCHES" | head -10
+          VIOLATIONS_FOUND=1
+          VIOLATION_DETAILS="${VIOLATION_DETAILS}Addresses (pattern) found\n"
+        fi
+
+        # Set output
+        echo "violations_found=$VIOLATIONS_FOUND" >> $GITHUB_OUTPUT
+        echo "violation_details<<EOF" >> $GITHUB_OUTPUT
+        echo -e "$VIOLATION_DETAILS" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+        if [[ $VIOLATIONS_FOUND -eq 1 ]]; then
+          echo "❌ Personal information detected!"
+          exit 1
+        else
+          echo "✅ No personal information detected"
+          exit 0
+        fi
+
+    - name: Send telemetry
+      if: always() && inputs.telemetry-pat != '' && inputs.telemetry-repo != ''
+      shell: bash
+      env:
+        TELEMETRY_PAT: ${{ inputs.telemetry-pat }}
+        TELEMETRY_REPO: ${{ inputs.telemetry-repo }}
+      run: |
+        VIOLATIONS="${{ steps.scan.outputs.violations_found }}"
+        DETAILS="${{ steps.scan.outputs.violation_details }}"
+
+        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+        PAYLOAD=$(cat <<EOF
+        {
+          "event_type": "personal-info-violation",
+          "client_payload": {
+            "repository": "${{ github.repository }}",
+            "ref": "${{ github.ref }}",
+            "sha": "${{ github.sha }}",
+            "actor": "${{ github.actor }}",
+            "workflow": "${{ github.workflow }}",
+            "violations_found": "$VIOLATIONS",
+            "violation_details": "$DETAILS",
+            "timestamp": "$TIMESTAMP"
+          }
+        }
+        EOF
+        )
+
+        curl -X POST \
+          -H "Authorization: token $TELEMETRY_PAT" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/$TELEMETRY_REPO/dispatches" \
+          -d "$PAYLOAD" || echo "Failed to send telemetry (non-blocking)"
