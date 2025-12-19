@@ -120,7 +120,7 @@ runs:
           exit 0
         fi
 
-- name: Save violation details to file
+    - name: Save violation details to file
       if: always()
       shell: bash
       run: |
@@ -139,20 +139,20 @@ runs:
         github-token: ${{ inputs.telemetry-pat }}
         script: |
           const fs = require('fs');
-          
+
           // Read violation details
           let violationsFound = '0';
           let violationDetails = '';
-          
+
           try {
             violationsFound = fs.readFileSync('violations_found.txt', 'utf8').trim();
             violationDetails = fs.readFileSync('violation_details.txt', 'utf8').trim();
           } catch (e) {
             console.log('Could not read violation files:', e.message);
           }
-          
+
           const [owner, repo] = process.env.TELEMETRY_REPO.split('/');
-          
+
           await github.rest.repos.createDispatchEvent({
             owner: owner,
             repo: repo,
@@ -168,7 +168,7 @@ runs:
               timestamp: new Date().toISOString()
             }
           });
-          
+
           console.log('Telemetry sent to ' + process.env.TELEMETRY_REPO);
 
     - name: No telemetry configured
