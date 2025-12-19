@@ -78,7 +78,7 @@ runs:
 
         # Check for capitalized word + surname (potential full names)
         echo "Checking for surnames..."
-        SURNAME_MATCHES=$(rg -i -n "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" --type-not binary 2>/dev/null | grep -ivE "($STREET_SUFFIXES)" || true)
+        SURNAME_MATCHES=$(rg -i -n "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" 2>/dev/null | grep -ivE "($STREET_SUFFIXES)" || true)
         if [[ -n "$SURNAME_MATCHES" ]]; then
           echo "::error::Found potential full names (surname pattern)"
           echo "$SURNAME_MATCHES" | head -10
