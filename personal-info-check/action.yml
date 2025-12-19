@@ -105,6 +105,13 @@ runs:
           VIOLATION_DETAILS="${VIOLATION_DETAILS}Addresses (pattern) found\n"
         fi
 
+        echo "DEBUG: First 100 chars of ALL_SURNAMES: ${ALL_SURNAMES:0:100}"
+        echo "DEBUG: Testing if Janssen is in pattern:"
+        echo "$ALL_SURNAMES" | grep -o "Janssen" || echo "Janssen NOT in pattern!"
+
+        echo "DEBUG: Testing ripgrep with built pattern:"
+        rg "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" test.py || echo "Pattern didn't match"
+
         # Set output
         echo "violations_found=$VIOLATIONS_FOUND" >> $GITHUB_OUTPUT
         echo "violation_details<<EOF" >> $GITHUB_OUTPUT
