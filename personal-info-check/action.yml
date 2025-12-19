@@ -129,24 +129,26 @@ runs:
         echo "${{ steps.scan.outputs.violation_details }}" > violation_details.txt
 
     - name: Send telemetry via repository dispatch
-      if: ${{ inputs.telemetry-pat != '' && steps.check.outputs.status == 'fail' }}
+      if: always() && inputs.telemetry-pat != '' && inputs.telemetry-repo != ''
       uses: actions/github-script@v7
       env:
-        STATUS: ${{ steps.check.outputs.status }}
-        MESSAGE: ${{ steps.check.outputs.message }}
+        VIOLATIONS_FOUND: ${{ steps.scan.outputs.violations_found }}
+        VIOLATION_DETAILS: ${{ steps.scan.outputs.violation_details }}
         TELEMETRY_REPO: ${{ inputs.telemetry-repo }}
       with:
         github-token: ${{ inputs.telemetry-pat }}
         script: |
           const fs = require('fs');
 
-          // Read blocked files
-          let blockedFiles = [];
+          // Read violation details
+          let violationsFound = '0';
+          let violationDetails = '';
+
           try {
-            const content = fs.readFileSync('blocked_files.txt', 'utf8');
-            blockedFiles = content.split('\n').filter(f => f.trim() !== '');
+            violationsFound = fs.readFileSync('violations_found.txt', 'utf8').trim();
+            violationDetails = fs.readFileSync('violation_details.txt', 'utf8').trim();
           } catch (e) {
-            // No blocked files
+            console.log('Could not read violation files:', e.message);
           }
 
           const [owner, repo] = process.env.TELEMETRY_REPO.split('/');
@@ -154,15 +156,15 @@ runs:
           await github.rest.repos.createDispatchEvent({
             owner: owner,
             repo: repo,
-            event_type: 'security_alert',
+            event_type: 'personal_info_violation',
             client_payload: {
               repository: process.env.GITHUB_REPOSITORY,
               run_id: process.env.GITHUB_RUN_ID,
               sha: process.env.GITHUB_SHA,
               ref: process.env.GITHUB_REF,
               actor: process.env.GITHUB_ACTOR,
-              status: process.env.STATUS,
-              blocked_files: blockedFiles,
+              violations_found: violationsFound,
+              violation_details: violationDetails,
               timestamp: new Date().toISOString()
             }
           });
@@ -170,12 +172,7 @@ runs:
           console.log('Telemetry sent to ' + process.env.TELEMETRY_REPO);
 
     - name: No telemetry configured
-      if: ${{ inputs.telemetry-pat == '' }}
+      if: inputs.telemetry-pat == ''
       shell: bash
       run: |
         echo "No telemetry-pat configured; skipping telemetry."
-
-    - name: Exit with appropriate code
-      shell: bash
-      run: |
-        exit ${{ steps.check.outputs.blocked }}
