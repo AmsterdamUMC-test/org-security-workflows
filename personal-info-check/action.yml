@@ -120,37 +120,59 @@ runs:
           exit 0
         fi
 
-    - name: Send telemetry
-      if: always() && inputs.telemetry-pat != '' && inputs.telemetry-repo != ''
+- name: Save violation details to file
+      if: always()
       shell: bash
-      env:
-        TELEMETRY_PAT: ${{ inputs.telemetry-pat }}
-        TELEMETRY_REPO: ${{ inputs.telemetry-repo }}
       run: |
-        VIOLATIONS="${{ steps.scan.outputs.violations_found }}"
-        DETAILS="${{ steps.scan.outputs.violation_details }}"
+        # Save violations for telemetry
+        echo "${{ steps.scan.outputs.violations_found }}" > violations_found.txt
+        echo "${{ steps.scan.outputs.violation_details }}" > violation_details.txt
 
-        TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-        PAYLOAD=$(cat <<EOF
-        {
-          "event_type": "personal-info-violation",
-          "client_payload": {
-            "repository": "${{ github.repository }}",
-            "ref": "${{ github.ref }}",
-            "sha": "${{ github.sha }}",
-            "actor": "${{ github.actor }}",
-            "workflow": "${{ github.workflow }}",
-            "violations_found": "$VIOLATIONS",
-            "violation_details": "$DETAILS",
-            "timestamp": "$TIMESTAMP"
+    - name: Send telemetry via repository dispatch
+      if: always() && inputs.telemetry-pat != '' && inputs.telemetry-repo != ''
+      uses: actions/github-script@v7
+      env:
+        VIOLATIONS_FOUND: ${{ steps.scan.outputs.violations_found }}
+        VIOLATION_DETAILS: ${{ steps.scan.outputs.violation_details }}
+        TELEMETRY_REPO: ${{ inputs.telemetry-repo }}
+      with:
+        github-token: ${{ inputs.telemetry-pat }}
+        script: |
+          const fs = require('fs');
+          
+          // Read violation details
+          let violationsFound = '0';
+          let violationDetails = '';
+          
+          try {
+            violationsFound = fs.readFileSync('violations_found.txt', 'utf8').trim();
+            violationDetails = fs.readFileSync('violation_details.txt', 'utf8').trim();
+          } catch (e) {
+            console.log('Could not read violation files:', e.message);
           }
-        }
-        EOF
-        )
+          
+          const [owner, repo] = process.env.TELEMETRY_REPO.split('/');
+          
+          await github.rest.repos.createDispatchEvent({
+            owner: owner,
+            repo: repo,
+            event_type: 'personal_info_violation',
+            client_payload: {
+              repository: process.env.GITHUB_REPOSITORY,
+              run_id: process.env.GITHUB_RUN_ID,
+              sha: process.env.GITHUB_SHA,
+              ref: process.env.GITHUB_REF,
+              actor: process.env.GITHUB_ACTOR,
+              violations_found: violationsFound,
+              violation_details: violationDetails,
+              timestamp: new Date().toISOString()
+            }
+          });
+          
+          console.log('Telemetry sent to ' + process.env.TELEMETRY_REPO);
 
-        curl -X POST \
-          -H "Authorization: token $TELEMETRY_PAT" \
-          -H "Accept: application/vnd.github+json" \
-          "https://api.github.com/repos/$TELEMETRY_REPO/dispatches" \
-          -d "$PAYLOAD" || echo "Failed to send telemetry (non-blocking)"
+    - name: No telemetry configured
+      if: inputs.telemetry-pat == ''
+      shell: bash
+      run: |
+        echo "No telemetry-pat configured; skipping telemetry."
