@@ -21,3 +21,11 @@
   stages: [pre-commit]
   files: .*
   always_run: true
+
+- id: check-personal-info-prepush
+  name: Check for personal information before push
+  entry: pre-push-check/check-personal-info-prepush.sh
+  language: script
+  stages: [pre-push]
+  always_run: true
+  pass_filenames: false
