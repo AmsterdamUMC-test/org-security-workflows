@@ -69,6 +69,9 @@ runs:
         # Check for first names + capitalized word (potential full names)
         echo "Checking for first names..."
         FIRSTNAME_MATCHES=$(rg -i -n "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" --type-not binary 2>/dev/null | grep -ivE "($STREET_SUFFIXES)" || true)
+        echo "DEBUG: Firstname matches found:"
+        echo "$FIRSTNAME_MATCHES"
+
         if [[ -n "$FIRSTNAME_MATCHES" ]]; then
           echo "::error::Found potential full names (first name pattern)"
           echo "$FIRSTNAME_MATCHES" | head -10
@@ -79,6 +82,8 @@ runs:
         # Check for capitalized word + surname (potential full names)
         echo "Checking for surnames..."
         SURNAME_MATCHES=$(rg -i -n "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" 2>/dev/null | grep -ivE "($STREET_SUFFIXES)" || true)
+        echo "DEBUG: Surname matches found:"
+        echo "$SURNAME_MATCHES"
         if [[ -n "$SURNAME_MATCHES" ]]; then
           echo "::error::Found potential full names (surname pattern)"
           echo "$SURNAME_MATCHES" | head -10
@@ -89,6 +94,10 @@ runs:
         # Check for addresses (street + number)
         echo "Checking for addresses..."
         ADDRESS_MATCHES=$(rg -i -n "($ALL_STREETS)[[:space:]]+[0-9]" --type-not binary 2>/dev/null || true)
+
+        echo "DEBUG: Address matches found:"
+        echo "$ADDRESS_MATCHES"
+
         if [[ -n "$ADDRESS_MATCHES" ]]; then
           echo "::error::Found addresses (known streets)"
           echo "$ADDRESS_MATCHES" | head -10
