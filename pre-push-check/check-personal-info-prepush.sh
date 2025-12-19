@@ -49,169 +49,172 @@ fi
 
 echo -e "${YELLOW}🔍 Scanning commits for personal information before push...${NC}"
 
-# Read push information from stdin
-# Format: <local ref> <local sha> <remote ref> <remote sha>
-while read local_ref local_sha remote_ref remote_sha; do
-    # Handle new branch (remote_sha is all zeros)
-    if [[ "$remote_sha" == "0000000000000000000000000000000000000000" ]]; then
-        # New branch - check last 10 commits (or from main/master)
-        if git rev-parse --verify origin/main >/dev/null 2>&1; then
-            remote_sha="origin/main"
-        elif git rev-parse --verify origin/master >/dev/null 2>&1; then
-            remote_sha="origin/master"
-        else
-            # If no main/master, just check last 10 commits
-            remote_sha="HEAD~10"
-        fi
-    fi
-    
-    # Get list of files changed in commits being pushed
-    CHANGED_FILES=$(git diff --name-only "$remote_sha".."$local_sha" 2>/dev/null || true)
-    
-    if [[ -z "$CHANGED_FILES" ]]; then
-        echo -e "${GREEN}✓ No files to check${NC}"
+# Get current branch name
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+
+# Determine the remote tracking branch
+REMOTE_BRANCH=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo "origin/$CURRENT_BRANCH")
+
+# If remote branch doesn't exist, compare with main/master
+if ! git rev-parse "$REMOTE_BRANCH" >/dev/null 2>&1; then
+    if git rev-parse origin/main >/dev/null 2>&1; then
+        REMOTE_BRANCH="origin/main"
+    elif git rev-parse origin/master >/dev/null 2>&1; then
+        REMOTE_BRANCH="origin/master"
+    else
+        echo -e "${YELLOW}⚠️  No remote branch found to compare against, skipping pre-push check${NC}"
         exit 0
     fi
+fi
+
+# Get list of files changed between remote and local
+CHANGED_FILES=$(git diff --name-only "$REMOTE_BRANCH"..HEAD 2>/dev/null || true)
+
+if [[ -z "$CHANGED_FILES" ]]; then
+    echo -e "${GREEN}✓ No files to check${NC}"
+    exit 0
+fi
+
+echo -e "${YELLOW}Checking $(echo "$CHANGED_FILES" | wc -l) changed files...${NC}"
+
+# Build combined patterns for fast initial checks
+ALL_FIRSTNAMES=$(cat "$FIRSTNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
+ALL_SURNAMES=$(cat "$SURNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
+ALL_STREETS=$(cat "$STREETNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
+
+# Dutch street suffixes
+STREET_SUFFIXES="straat|laan|weg|plein|gracht|kade|singel|dijk|steeg|pad|dreef|boulevard"
+
+# Initialize violation flag
+VIOLATIONS_FOUND=0
+
+# Function to check for matches in a file
+check_file_for_personal_info() {
+    local file=$1
+    local found_violation=0
     
-    # Build combined patterns for fast initial checks
-    ALL_FIRSTNAMES=$(cat "$FIRSTNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
-    ALL_SURNAMES=$(cat "$SURNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
-    ALL_STREETS=$(cat "$STREETNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
+    # Skip if file doesn't exist (deleted files)
+    if [[ ! -f "$file" ]]; then
+        return 0
+    fi
     
-    # Dutch street suffixes
-    STREET_SUFFIXES="straat|laan|weg|plein|gracht|kade|singel|dijk|steeg|pad|dreef|boulevard"
+    # Skip binary files
+    if ! file "$file" | grep -q "text"; then
+        return 0
+    fi
     
-    # Initialize violation flag
-    VIOLATIONS_FOUND=0
+    # Check for 7-digit patient IDs
+    if grep -qE '\b[0-9]{7}\b' "$file"; then
+        echo -e "  ${RED}[Patient ID]${NC} 7-digit numbers found in ${YELLOW}$file${NC}:"
+        grep -nE '\b[0-9]{7}\b' "$file" | head -5 | while IFS=: read -r line_num content; do
+            echo -e "    Line $line_num: $content"
+        done
+        found_violation=1
+    fi
     
-    # Function to check for matches in a file
-    check_file_for_personal_info() {
-        local file=$1
-        local found_violation=0
+    # PHASE 1: Fast check - does file contain ANY first name?
+    if grep -iqE "\b($ALL_FIRSTNAMES)\b" "$file"; then
+        # PHASE 2: Check for first name followed by capitalized word (potential full name)
+        # BUT exclude matches that are street names (contain street suffixes)
         
-        # Skip if file doesn't exist (deleted files)
-        if [[ ! -f "$file" ]]; then
-            return 0
-        fi
+        # First, get lines with potential names
+        POTENTIAL_NAMES=$(grep -iE "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" "$file" || true)
         
-        # Skip binary files
-        if ! file "$file" | grep -q "text"; then
-            return 0
-        fi
-        
-        # Check for 7-digit patient IDs
-        if grep -qE '\b[0-9]{7}\b' "$file"; then
-            echo -e "  ${RED}[Patient ID]${NC} 7-digit numbers found in ${YELLOW}$file${NC}:"
-            grep -nE '\b[0-9]{7}\b' "$file" | head -5 | while IFS=: read -r line_num content; do
-                echo -e "    Line $line_num: $content"
-            done
-            found_violation=1
-        fi
-        
-        # PHASE 1: Fast check - does file contain ANY first name?
-        if grep -iqE "\b($ALL_FIRSTNAMES)\b" "$file"; then
-            # PHASE 2: Check for first name followed by capitalized word (potential full name)
-            # BUT exclude matches that are street names (contain street suffixes)
+        if [[ -n "$POTENTIAL_NAMES" ]]; then
+            # Filter out lines that contain street suffixes
+            FILTERED_NAMES=$(echo "$POTENTIAL_NAMES" | grep -ivE "($STREET_SUFFIXES)" || true)
             
-            # First, get lines with potential names
-            POTENTIAL_NAMES=$(grep -iE "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" "$file" || true)
-            
-            if [[ -n "$POTENTIAL_NAMES" ]]; then
-                # Filter out lines that contain street suffixes
-                FILTERED_NAMES=$(echo "$POTENTIAL_NAMES" | grep -ivE "($STREET_SUFFIXES)" || true)
-                
-                if [[ -n "$FILTERED_NAMES" ]]; then
-                    echo -e "  ${RED}[Potential Full Name]${NC} First name followed by capitalized word in ${YELLOW}$file${NC}:"
-                    echo "$FILTERED_NAMES" | head -3 | while IFS= read -r line; do
-                        # Get line number for this match
-                        LINE_NUM=$(grep -nF "$line" "$file" | head -1 | cut -d: -f1)
-                        echo -e "    Line $LINE_NUM: $line"
-                    done
-                    found_violation=1
-                fi
+            if [[ -n "$FILTERED_NAMES" ]]; then
+                echo -e "  ${RED}[Potential Full Name]${NC} First name followed by capitalized word in ${YELLOW}$file${NC}:"
+                echo "$FILTERED_NAMES" | head -3 | while IFS= read -r line; do
+                    # Get line number for this match
+                    LINE_NUM=$(grep -nF "$line" "$file" | head -1 | cut -d: -f1)
+                    echo -e "    Line $LINE_NUM: $line"
+                done
+                found_violation=1
             fi
         fi
+    fi
+    
+    # PHASE 1: Fast check - does file contain ANY surname?
+    if [[ $found_violation -eq 0 ]] && grep -iqE "\b($ALL_SURNAMES)\b" "$file"; then
+        # PHASE 2: Check for capitalized word followed by surname (potential full name)
+        # BUT exclude matches that are street names (contain street suffixes)
         
-        # PHASE 1: Fast check - does file contain ANY surname?
-        if [[ $found_violation -eq 0 ]] && grep -iqE "\b($ALL_SURNAMES)\b" "$file"; then
-            # PHASE 2: Check for capitalized word followed by surname (potential full name)
-            # BUT exclude matches that are street names (contain street suffixes)
+        # First, get lines with potential names
+        POTENTIAL_NAMES=$(grep -iE "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" "$file" || true)
+        
+        if [[ -n "$POTENTIAL_NAMES" ]]; then
+            # Filter out lines that contain street suffixes
+            FILTERED_NAMES=$(echo "$POTENTIAL_NAMES" | grep -ivE "($STREET_SUFFIXES)" || true)
             
-            # First, get lines with potential names
-            POTENTIAL_NAMES=$(grep -iE "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" "$file" || true)
-            
-            if [[ -n "$POTENTIAL_NAMES" ]]; then
-                # Filter out lines that contain street suffixes
-                FILTERED_NAMES=$(echo "$POTENTIAL_NAMES" | grep -ivE "($STREET_SUFFIXES)" || true)
-                
-                if [[ -n "$FILTERED_NAMES" ]]; then
-                    echo -e "  ${RED}[Potential Full Name]${NC} Capitalized word followed by surname in ${YELLOW}$file${NC}:"
-                    echo "$FILTERED_NAMES" | head -3 | while IFS= read -r line; do
-                        # Get line number for this match
-                        LINE_NUM=$(grep -nF "$line" "$file" | head -1 | cut -d: -f1)
-                        echo -e "    Line $LINE_NUM: $line"
-                    done
-                    found_violation=1
-                fi
+            if [[ -n "$FILTERED_NAMES" ]]; then
+                echo -e "  ${RED}[Potential Full Name]${NC} Capitalized word followed by surname in ${YELLOW}$file${NC}:"
+                echo "$FILTERED_NAMES" | head -3 | while IFS= read -r line; do
+                    # Get line number for this match
+                    LINE_NUM=$(grep -nF "$line" "$file" | head -1 | cut -d: -f1)
+                    echo -e "    Line $LINE_NUM: $line"
+                done
+                found_violation=1
             fi
         fi
-        
-        # Check for street names WITH house numbers only (actual addresses)
-        
-        # 1. Known street names from list + number
-        if grep -iqE "($ALL_STREETS)[[:space:]]+[0-9]" "$file"; then
-            echo -e "  ${RED}[Address]${NC} Street name with house number in ${YELLOW}$file${NC}:"
-            grep -inE "($ALL_STREETS)[[:space:]]+[0-9]" "$file" | head -3 | while IFS=: read -r line_num content; do
-                echo -e "    Line $line_num: $content"
-            done
-            found_violation=1
-        fi
-        
-        # 2. Any word ending in street suffix + number (Stationstraat 123, Hoofdweg 45, etc.)
-        if grep -qE "\b[A-Z][a-z]{4,}($STREET_SUFFIXES)[[:space:]]+[0-9]" "$file"; then
-            echo -e "  ${RED}[Address]${NC} Street pattern with house number in ${YELLOW}$file${NC}:"
-            grep -nE "\b[A-Z][a-z]{4,}($STREET_SUFFIXES)[[:space:]]+[0-9]" "$file" | head -3 | while IFS=: read -r line_num content; do
-                echo -e "    Line $line_num: $content"
-            done
-            found_violation=1
-        fi
-        
-        if [[ $found_violation -eq 1 ]]; then
-            return 1  # Return 1 = found violation (error/failure)
-        else
-            return 0  # Return 0 = no violation (success)
-        fi
-    }
+    fi
     
-    # Check each changed file
-    for file in $CHANGED_FILES; do
-        if [[ -f "$file" ]]; then
-            if ! check_file_for_personal_info "$file"; then
-                VIOLATIONS_FOUND=1
-            fi
-        fi
-    done
+    # Check for street names WITH house numbers only (actual addresses)
     
-    # Report results
-    if [[ $VIOLATIONS_FOUND -eq 1 ]]; then
-        echo ""
-        echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
-        echo -e "${RED}║  ⚠️  PERSONAL INFORMATION DETECTED - PUSH BLOCKED         ║${NC}"
-        echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
-        echo ""
-        echo -e "${YELLOW}Personal information was detected in commits you're trying to push.${NC}"
-        echo -e "${YELLOW}This may include patient IDs, names, or addresses.${NC}"
-        echo ""
-        echo -e "${YELLOW}Please remove the sensitive data and amend your commits.${NC}"
-        echo ""
-        echo "To bypass this check (NOT RECOMMENDED):"
-        echo "  git push --no-verify"
-        echo ""
-        exit 1
+    # 1. Known street names from list + number
+    if grep -iqE "($ALL_STREETS)[[:space:]]+[0-9]" "$file"; then
+        echo -e "  ${RED}[Address]${NC} Street name with house number in ${YELLOW}$file${NC}:"
+        grep -inE "($ALL_STREETS)[[:space:]]+[0-9]" "$file" | head -3 | while IFS=: read -r line_num content; do
+            echo -e "    Line $line_num: $content"
+        done
+        found_violation=1
+    fi
+    
+    # 2. Any word ending in street suffix + number (Stationstraat 123, Hoofdweg 45, etc.)
+    if grep -qE "\b[A-Z][a-z]{4,}($STREET_SUFFIXES)[[:space:]]+[0-9]" "$file"; then
+        echo -e "  ${RED}[Address]${NC} Street pattern with house number in ${YELLOW}$file${NC}:"
+        grep -nE "\b[A-Z][a-z]{4,}($STREET_SUFFIXES)[[:space:]]+[0-9]" "$file" | head -3 | while IFS=: read -r line_num content; do
+            echo -e "    Line $line_num: $content"
+        done
+        found_violation=1
+    fi
+    
+    if [[ $found_violation -eq 1 ]]; then
+        return 1  # Return 1 = found violation (error/failure)
     else
-        echo ""
-        echo -e "${GREEN}✓ No personal information detected in commits${NC}"
+        return 0  # Return 0 = no violation (success)
+    fi
+}
+
+# Check each changed file
+for file in $CHANGED_FILES; do
+    if [[ -f "$file" ]]; then
+        if ! check_file_for_personal_info "$file"; then
+            VIOLATIONS_FOUND=1
+        fi
     fi
 done
+
+# Report results
+if [[ $VIOLATIONS_FOUND -eq 1 ]]; then
+    echo ""
+    echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${RED}║  ⚠️  PERSONAL INFORMATION DETECTED - PUSH BLOCKED         ║${NC}"
+    echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${YELLOW}Personal information was detected in commits you're trying to push.${NC}"
+    echo -e "${YELLOW}This may include patient IDs, names, or addresses.${NC}"
+    echo ""
+    echo -e "${YELLOW}Please remove the sensitive data and amend your commits.${NC}"
+    echo ""
+    echo "To bypass this check (NOT RECOMMENDED):"
+    echo "  git push --no-verify"
+    echo ""
+    exit 1
+else
+    echo ""
+    echo -e "${GREEN}✓ No personal information detected in commits${NC}"
+fi
 
 exit 0
