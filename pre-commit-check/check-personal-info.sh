@@ -4,11 +4,20 @@
 
 set -e
 
-# Colors for output
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-GREEN='\033[0;32m'
-NC='\033[0m' # No Color
+# Detect if terminal supports colors
+if [[ -t 1 ]]; then
+    # Terminal - use colors
+    RED='\033[0;31m'
+    YELLOW='\033[1;33m'
+    GREEN='\033[0;32m'
+    NC='\033[0m' # No Color
+else
+    # Non-terminal (VSCode, pipes, etc.) - no colors
+    RED=''
+    YELLOW=''
+    GREEN=''
+    NC=''
+fi
 
 # Path to reference files
 # Find the repo root by looking for .pre-commit-hooks.yaml
@@ -175,8 +184,8 @@ if [[ $VIOLATIONS_FOUND -eq 1 ]]; then
     echo ""
     echo -e "${YELLOW}Please remove the sensitive data before committing.${NC}"
     echo ""
-    echo -e "To bypass this check (NOT RECOMMENDED):"
-    echo -e "  git commit --no-verify"
+    echo "To bypass this check (NOT RECOMMENDED):"
+    echo "  git commit --no-verify"
     echo ""
     exit 1
 else
