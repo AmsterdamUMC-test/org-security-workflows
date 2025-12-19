@@ -54,9 +54,6 @@ ALL_FIRSTNAMES=$(cat "$FIRSTNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
 ALL_SURNAMES=$(cat "$SURNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
 ALL_STREETS=$(cat "$STREETNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
 
-# Build patterns for street name checks
-LONG_STREETS=$(awk 'length($0) >= 10' "$STREETNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
-
 # Dutch street suffixes
 STREET_SUFFIXES="straat|laan|weg|plein|gracht|kade|singel|dijk|steeg|pad|dreef|boulevard"
 
@@ -130,27 +127,24 @@ check_file_for_personal_info() {
         fi
     fi
     
-    # PHASE 1: Fast check - does file contain ANY street name?
-    if grep -iqE "($ALL_STREETS)" "$file"; then
-        # PHASE 2: Context-aware checking for street names
-        
-        # Check for any street name + house number (strong indicator)
-        if grep -iqE "($ALL_STREETS)[[:space:]]+[0-9]" "$file"; then
-            echo -e "  ${RED}[Street + Number]${NC} Street name with house number in ${YELLOW}$file${NC}:"
-            grep -inE "($ALL_STREETS)[[:space:]]+[0-9]" "$file" | head -3 | while IFS=: read -r line_num content; do
-                echo -e "    Line $line_num: $content"
-            done
-            found_violation=1
-        fi
-        
-        # Check long street names (10+ chars) without number
-        if [[ -n "$LONG_STREETS" ]] && grep -iqE "($LONG_STREETS)" "$file"; then
-            echo -e "  ${RED}[Street Name]${NC} Long street name found in ${YELLOW}$file${NC}:"
-            grep -inE "($LONG_STREETS)" "$file" | head -3 | while IFS=: read -r line_num content; do
-                echo -e "    Line $line_num: $content"
-            done
-            found_violation=1
-        fi
+    # Check for street names WITH house numbers only (actual addresses)
+    
+    # 1. Known street names from list + number
+    if grep -iqE "($ALL_STREETS)[[:space:]]+[0-9]" "$file"; then
+        echo -e "  ${RED}[Address]${NC} Street name with house number in ${YELLOW}$file${NC}:"
+        grep -inE "($ALL_STREETS)[[:space:]]+[0-9]" "$file" | head -3 | while IFS=: read -r line_num content; do
+            echo -e "    Line $line_num: $content"
+        done
+        found_violation=1
+    fi
+    
+    # 2. Any word ending in street suffix + number (Stationstraat 123, Hoofdweg 45, etc.)
+    if grep -qE "\b[A-Z][a-z]{4,}($STREET_SUFFIXES)[[:space:]]+[0-9]" "$file"; then
+        echo -e "  ${RED}[Address]${NC} Street pattern with house number in ${YELLOW}$file${NC}:"
+        grep -nE "\b[A-Z][a-z]{4,}($STREET_SUFFIXES)[[:space:]]+[0-9]" "$file" | head -3 | while IFS=: read -r line_num content; do
+            echo -e "    Line $line_num: $content"
+        done
+        found_violation=1
     fi
     
     if [[ $found_violation -eq 1 ]]; then
