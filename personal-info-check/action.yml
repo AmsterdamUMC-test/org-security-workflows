@@ -53,6 +53,8 @@ runs:
         ALL_FIRSTNAMES=$(cat "$FIRSTNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
         ALL_SURNAMES=$(cat "$SURNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
         ALL_STREETS=$(cat "$STREETNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
+
+        # Keep this list aligned with the hooks (used both for address detection + filtering name matches)
         STREET_SUFFIXES="straat|laan|weg|plein|gracht|kade|singel|dijk|steeg|pad|dreef|boulevard"
 
         VIOLATIONS_FOUND=0
@@ -67,8 +69,13 @@ runs:
         fi
 
         # Check for first names + capitalized word (potential full names)
+        #
+        # FIX (2): Remove -i so [A-Z][a-z] retains meaning, but keep the name-list case-insensitive
+        #          using PCRE2 inline flag (?i:...).
+        # FIX (1): Filter out lines that look like addresses (contain street suffixes), like the hooks do.
         echo "Checking for first names..."
-        FIRSTNAME_MATCHES=$(rg -i -n "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" . 2>/dev/null || true)
+        FIRSTNAME_MATCHES_RAW=$(rg -n --pcre2 "\b(?i:($ALL_FIRSTNAMES))\s+[A-Z][a-z]{2,}" . 2>/dev/null || true)
+        FIRSTNAME_MATCHES=$(echo "$FIRSTNAME_MATCHES_RAW" | rg -n --pcre2 -v "\b($STREET_SUFFIXES)\b" 2>/dev/null || true)
         if [[ -n "$FIRSTNAME_MATCHES" ]]; then
           echo "::error::Found potential full names (first name pattern)"
           echo "$FIRSTNAME_MATCHES" | head -10
@@ -77,8 +84,12 @@ runs:
         fi
 
         # Check for capitalized word + surname (potential full names)
+        #
+        # FIX (2): Remove -i so [A-Z][a-z] retains meaning, but keep surname-list case-insensitive.
+        # FIX (1): Filter out lines that look like addresses (contain street suffixes).
         echo "Checking for surnames..."
-        SURNAME_MATCHES=$(rg -i -n "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" . 2>/dev/null || true)
+        SURNAME_MATCHES_RAW=$(rg -n --pcre2 "[A-Z][a-z]{2,}\s+\b(?i:($ALL_SURNAMES))\b" . 2>/dev/null || true)
+        SURNAME_MATCHES=$(echo "$SURNAME_MATCHES_RAW" | rg -n --pcre2 -v "\b($STREET_SUFFIXES)\b" 2>/dev/null || true)
         if [[ -n "$SURNAME_MATCHES" ]]; then
           echo "::error::Found potential full names (surname pattern)"
           echo "$SURNAME_MATCHES" | head -10
