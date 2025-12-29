@@ -50,10 +50,10 @@ fi
 
 echo -e "${YELLOW}🔍 Scanning staged files for personal information...${NC}"
 
-# Get list of staged files (text files only)
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM)
+# Check if there are any staged files
+STAGED_COUNT=$(git diff --cached --name-only --diff-filter=ACM | wc -l)
 
-if [[ -z "$STAGED_FILES" ]]; then
+if [[ "$STAGED_COUNT" -eq 0 ]]; then
     echo -e "${GREEN}✓ No staged files to check${NC}"
     exit 0
 fi
@@ -89,12 +89,12 @@ check_file_for_personal_info() {
     fi
     
     # PHASE 1: Fast check - does file contain ANY first name?
-    if grep -iqE "\b($ALL_FIRSTNAMES)\b" "$file"; then
+    if grep -qE "\b($ALL_FIRSTNAMES)\b" "$file"; then
         # PHASE 2: Check for first name followed by capitalized word (potential full name)
         # BUT exclude matches that are street names (contain street suffixes)
         
         # First, get lines with potential names
-        POTENTIAL_NAMES=$(grep -iE "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" "$file" || true)
+        POTENTIAL_NAMES=$(grep -E "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" "$file" || true)
         
         if [[ -n "$POTENTIAL_NAMES" ]]; then
             # Filter out lines that contain street suffixes
@@ -113,12 +113,12 @@ check_file_for_personal_info() {
     fi
     
     # PHASE 1: Fast check - does file contain ANY surname?
-    if [[ $found_violation -eq 0 ]] && grep -iqE "\b($ALL_SURNAMES)\b" "$file"; then
+    if [[ $found_violation -eq 0 ]] && grep -qE "\b($ALL_SURNAMES)\b" "$file"; then
         # PHASE 2: Check for capitalized word followed by surname (potential full name)
         # BUT exclude matches that are street names (contain street suffixes)
         
         # First, get lines with potential names
-        POTENTIAL_NAMES=$(grep -iE "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" "$file" || true)
+        POTENTIAL_NAMES=$(grep -E "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" "$file" || true)
         
         if [[ -n "$POTENTIAL_NAMES" ]]; then
             # Filter out lines that contain street suffixes
@@ -163,21 +163,21 @@ check_file_for_personal_info() {
     fi
 }
 
-# Check each staged file
-for file in $STAGED_FILES; do
+# Check each staged file using null-delimited output
+while IFS= read -r -d '' file; do
     if [[ -f "$file" ]]; then
         if ! check_file_for_personal_info "$file"; then
             VIOLATIONS_FOUND=1
         fi
     fi
-done
+done < <(git diff --cached --name-only --diff-filter=ACM -z)
 
 # Report results
 if [[ $VIOLATIONS_FOUND -eq 1 ]]; then
     echo ""
-    echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${RED}╔═════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${RED}║  ⚠️  PERSONAL INFORMATION DETECTED - COMMIT BLOCKED       ║${NC}"
-    echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${RED}╚═════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${YELLOW}Personal information was detected in your staged files.${NC}"
     echo -e "${YELLOW}This may include patient IDs, names, or addresses.${NC}"

@@ -67,15 +67,15 @@ if ! git rev-parse "$REMOTE_BRANCH" >/dev/null 2>&1; then
     fi
 fi
 
-# Get list of files changed between remote and local
-CHANGED_FILES=$(git diff --name-only "$REMOTE_BRANCH"..HEAD 2>/dev/null || true)
+# Check if there are any changed files
+CHANGED_COUNT=$(git diff --name-only "$REMOTE_BRANCH"..HEAD 2>/dev/null | wc -l || echo "0")
 
-if [[ -z "$CHANGED_FILES" ]]; then
+if [[ "$CHANGED_COUNT" -eq 0 ]]; then
     echo -e "${GREEN}✓ No files to check${NC}"
     exit 0
 fi
 
-echo -e "${YELLOW}Checking $(echo "$CHANGED_FILES" | wc -l) changed files...${NC}"
+echo -e "${YELLOW}Checking $CHANGED_COUNT changed files...${NC}"
 
 # Build combined patterns for fast initial checks
 ALL_FIRSTNAMES=$(cat "$FIRSTNAMES_FILE" | tr '\n' '|' | sed 's/|$//')
@@ -113,12 +113,12 @@ check_file_for_personal_info() {
     fi
     
     # PHASE 1: Fast check - does file contain ANY first name?
-    if grep -iqE "\b($ALL_FIRSTNAMES)\b" "$file"; then
+    if grep -qE "\b($ALL_FIRSTNAMES)\b" "$file"; then
         # PHASE 2: Check for first name followed by capitalized word (potential full name)
         # BUT exclude matches that are street names (contain street suffixes)
         
         # First, get lines with potential names
-        POTENTIAL_NAMES=$(grep -iE "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" "$file" || true)
+        POTENTIAL_NAMES=$(grep -E "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" "$file" || true)
         
         if [[ -n "$POTENTIAL_NAMES" ]]; then
             # Filter out lines that contain street suffixes
@@ -137,12 +137,12 @@ check_file_for_personal_info() {
     fi
     
     # PHASE 1: Fast check - does file contain ANY surname?
-    if [[ $found_violation -eq 0 ]] && grep -iqE "\b($ALL_SURNAMES)\b" "$file"; then
+    if [[ $found_violation -eq 0 ]] && grep -qE "\b($ALL_SURNAMES)\b" "$file"; then
         # PHASE 2: Check for capitalized word followed by surname (potential full name)
         # BUT exclude matches that are street names (contain street suffixes)
         
         # First, get lines with potential names
-        POTENTIAL_NAMES=$(grep -iE "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" "$file" || true)
+        POTENTIAL_NAMES=$(grep -E "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" "$file" || true)
         
         if [[ -n "$POTENTIAL_NAMES" ]]; then
             # Filter out lines that contain street suffixes
@@ -187,34 +187,11 @@ check_file_for_personal_info() {
     fi
 }
 
-# Check each changed file
-for file in $CHANGED_FILES; do
+# Check each changed file using null-delimited output
+while IFS= read -r -d '' file; do
     if [[ -f "$file" ]]; then
         if ! check_file_for_personal_info "$file"; then
             VIOLATIONS_FOUND=1
         fi
     fi
-done
-
-# Report results
-if [[ $VIOLATIONS_FOUND -eq 1 ]]; then
-    echo ""
-    echo -e "${RED}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}║  ⚠️  PERSONAL INFORMATION DETECTED - PUSH BLOCKED         ║${NC}"
-    echo -e "${RED}╚════════════════════════════════════════════════════════════╝${NC}"
-    echo ""
-    echo -e "${YELLOW}Personal information was detected in commits you're trying to push.${NC}"
-    echo -e "${YELLOW}This may include patient IDs, names, or addresses.${NC}"
-    echo ""
-    echo -e "${YELLOW}Please remove the sensitive data and amend your commits.${NC}"
-    echo ""
-    echo "To bypass this check (NOT RECOMMENDED):"
-    echo "  git push --no-verify"
-    echo ""
-    exit 1
-else
-    echo ""
-    echo -e "${GREEN}✓ No personal information detected in commits${NC}"
-fi
-
-exit 0
+done < <(git diff --name-only -z "$REMOTE_BRANCH
