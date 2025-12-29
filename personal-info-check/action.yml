@@ -62,8 +62,10 @@ runs:
 
         # Check for 7-digit patient IDs
         echo "Checking for patient IDs..."
-        if rg -n '\b[0-9]{7}\b' . 2>/dev/null; then
+        PATIENT_ID_MATCHES=$(rg -n --glob '!*.md' '\b[0-9]{7}\b' . 2>/dev/null || true)
+        if [[ -n "$PATIENT_ID_MATCHES" ]]; then
           echo "::error::Found 7-digit patient IDs"
+          echo "$PATIENT_ID_MATCHES" | head -10
           VIOLATIONS_FOUND=1
           VIOLATION_DETAILS="${VIOLATION_DETAILS}Patient IDs found\n"
         fi
@@ -74,7 +76,7 @@ runs:
         #          using PCRE2 inline flag (?i:...).
         # FIX (1): Filter out lines that look like addresses (contain street suffixes), like the hooks do.
         echo "Checking for first names..."
-        FIRSTNAME_MATCHES_RAW=$(rg -n --pcre2 "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" . 2>/dev/null || true)
+        FIRSTNAME_MATCHES_RAW=$(rg -n --glob '!*.md' --pcre2 "\b($ALL_FIRSTNAMES)\s+[A-Z][a-z]{2,}" . 2>/dev/null || true)
         FIRSTNAME_MATCHES=$(echo "$FIRSTNAME_MATCHES_RAW" | rg -n --pcre2 -v "\b($STREET_SUFFIXES)\b" 2>/dev/null || true)
         if [[ -n "$FIRSTNAME_MATCHES" ]]; then
           echo "::error::Found potential full names (first name pattern)"
@@ -86,7 +88,7 @@ runs:
         # Check for capitalized word + surname (potential full names)
         #
         echo "Checking for surnames..."
-        SURNAME_MATCHES_RAW=$(rg -n --pcre2 "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" . 2>/dev/null || true)
+        SURNAME_MATCHES_RAW=$(rg -n --glob '!*.md' --pcre2 "[A-Z][a-z]{2,}\s+\b($ALL_SURNAMES)\b" . 2>/dev/null || true)
         SURNAME_MATCHES=$(echo "$SURNAME_MATCHES_RAW" | rg -n --pcre2 -v "\b($STREET_SUFFIXES)\b" 2>/dev/null || true)
         if [[ -n "$SURNAME_MATCHES" ]]; then
           echo "::error::Found potential full names (surname pattern)"
@@ -97,7 +99,8 @@ runs:
 
         # Check for addresses (street + number)
         echo "Checking for addresses..."
-        ADDRESS_MATCHES=$(rg -i -n "($ALL_STREETS)[[:space:]]+[0-9]" . 2>/dev/null || true)
+        ADDRESS_MATCHES=$(rg -n --glob '!*.md' -i "($ALL_STREETS)[[:space:]]+[0-9]" . 2>/dev/null || true)
+
 
         if [[ -n "$ADDRESS_MATCHES" ]]; then
           echo "::error::Found addresses (known streets)"
@@ -107,7 +110,8 @@ runs:
         fi
 
         # Check for street pattern + number
-        STREET_PATTERN_MATCHES=$(rg -n "\b[A-Z][a-z]{4,}($STREET_SUFFIXES)[[:space:]]+[0-9]" . 2>/dev/null || true)
+        STREET_PATTERN_MATCHES=$(rg -n --glob '!*.md' "\b[A-Z][a-z]{4,}($STREET_SUFFIXES)[[:space:]]+[0-9]" . 2>/dev/null || true)
+
         if [[ -n "$STREET_PATTERN_MATCHES" ]]; then
           echo "::error::Found addresses (street pattern)"
           echo "$STREET_PATTERN_MATCHES" | head -10

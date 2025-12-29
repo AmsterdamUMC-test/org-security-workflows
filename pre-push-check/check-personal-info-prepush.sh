@@ -93,6 +93,11 @@ check_file_for_personal_info() {
     local file=$1
     local found_violation=0
     
+    # Skip markdown files (documentation often contains example names/addresses)
+    if [[ "$file" == *.md ]]; then
+        return 0
+    fi
+
     # Skip if file doesn't exist (deleted files)
     if [[ ! -f "$file" ]]; then
         return 0
